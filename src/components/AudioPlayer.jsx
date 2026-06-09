@@ -164,122 +164,207 @@ export default function AudioPlayer({ filePath, fileName }) {
 
     if (!filePath) return null;
 
-    return (
-        <div className="rounded-2xl border border-white/12 p-5"
-            style={{
-                background: "linear-gradient(135deg, rgba(139,92,246,0.08) 0%, rgba(59,130,246,0.05) 100%)",
-                backdropFilter: "blur(12px)",
-            }}>
-            <audio
-                ref={audioRef}
-                src={`${BASE_URL}${filePath}`}
-                preload="metadata"
-            />
+    // Issue #1 frontend fix — encode each path segment so spaces, '#', '?'
+    // etc. in legacy DB rows don't break the URL the browser constructs.
+    // encodeURIComponent encodes everything; we then restore the '/' separators.
+    const safeSrc = BASE_URL + filePath.split("/").map(encodeURIComponent).join("/");
 
-            {/* ── Title row ── */}
-            <div className="flex items-center gap-3 mb-4">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0 border transition-all
-                    ${playing
-                        ? "bg-violet-500/25 border-violet-500/40 shadow-lg shadow-violet-500/20"
-                        : "bg-white/8 border-white/10"}`}>
+    return (
+        /* ── Card shell — glassmorphism matching the rest of the app ── */
+        <div style={{
+            background: "linear-gradient(135deg, rgba(139,92,246,0.07) 0%, rgba(30,27,75,0.6) 50%, rgba(10,22,40,0.7) 100%)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            border: "1px solid rgba(139,92,246,0.2)",
+            borderRadius: 20,
+            padding: "20px 22px",
+        }}>
+            <audio ref={audioRef} src={safeSrc} preload="metadata" />
+
+            {/* ── Header row: icon · title · time counter ── */}
+            <div className="flex items-center gap-3 mb-5">
+                {/* Animated icon */}
+                <div style={{
+                    width: 40, height: 40, borderRadius: 12, flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: playing ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.06)",
+                    border: playing ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.09)",
+                    boxShadow: playing ? "0 0 14px rgba(139,92,246,0.3)" : "none",
+                    transition: "all 0.3s ease",
+                }}>
                     {playing ? (
-                        <span className="flex gap-px items-end h-4">
+                        <span className="flex gap-px items-end" style={{ height: 16 }}>
                             {[0,1,2].map(i => (
-                                <span key={i} className="w-0.5 rounded-full bg-violet-400"
-                                    style={{ height: `${35 + i * 25}%`, animation: `audioBar 0.7s ease-in-out ${i * 0.15}s infinite alternate` }} />
+                                <span key={i} style={{
+                                    width: 2.5, borderRadius: 2,
+                                    background: "linear-gradient(180deg,#a78bfa,#60a5fa)",
+                                    height: `${35 + i * 25}%`,
+                                    animation: `audioBar 0.7s ease-in-out ${i*0.15}s infinite alternate`,
+                                }} />
                             ))}
                         </span>
-                    ) : "🎙️"}
+                    ) : (
+                        <span style={{ fontSize: 17, lineHeight: 1 }}>🎙️</span>
+                    )}
                 </div>
-                <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-white truncate">{fileName || "Recording"}</p>
-                    <p className="text-xs mt-0.5 font-mono"
-                        style={{ color: isError ? "#ef4444" : "#64748b" }}>
-                        {isError ? "⚠️ Audio unavailable" : isLoading ? "Buffering…" : `${fmt(current)} / ${fmt(duration)}`}
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{
+                        fontSize: 13, fontWeight: 600, color: "#f1f5f9",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        marginBottom: 2,
+                    }}>
+                        {fileName || "Recording"}
+                    </p>
+                    <p style={{
+                        fontSize: 11, fontFamily: "ui-monospace,monospace",
+                        color: isError ? "#f87171" : "#475569",
+                    }}>
+                        {isError ? "⚠ Audio unavailable" : isLoading ? "Buffering…" : `${fmt(current)} · ${fmt(duration)}`}
                     </p>
                 </div>
-                {/* Always-visible time display — fixes "only on hover" complaint */}
+
+                {/* Always-visible time stamp (Issue #3 fix) */}
                 {!isError && duration > 0 && (
-                    <div className="flex-shrink-0 text-right">
-                        <p className="text-xs font-mono font-bold text-white">{fmt(current)}</p>
-                        <p className="text-xs font-mono text-slate-600">{fmt(duration)}</p>
+                    <div style={{ flexShrink: 0, textAlign: "right" }}>
+                        <p style={{ fontSize: 13, fontFamily: "ui-monospace,monospace", fontWeight: 700, color: "#e2e8f0", lineHeight: 1 }}>
+                            {fmt(current)}
+                        </p>
+                        <p style={{ fontSize: 10, fontFamily: "ui-monospace,monospace", color: "#334155", marginTop: 2 }}>
+                            {fmt(duration)}
+                        </p>
                     </div>
                 )}
             </div>
 
             {isError ? (
-                <div className="flex items-center justify-center gap-2 py-4 text-sm text-red-400">
+                <div style={{
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                    padding: "14px 0", fontSize: 13, color: "#f87171",
+                    background: "rgba(239,68,68,0.07)", borderRadius: 12,
+                    border: "1px solid rgba(239,68,68,0.15)",
+                }}>
                     <span>⚠️</span>
                     <span>Could not load audio file</span>
                 </div>
             ) : (
                 <>
-                    {/* ── Progress bar — always visible ── */}
+                    {/* ── Progress track ─────────────────────────────────────────
+                        Always fully visible. The thumb is permanent, not hover-only.
+                        Clicking anywhere seeks. Playing adds a glow on the fill. */}
                     <div
                         ref={trackRef}
                         onClick={seek}
-                        className="relative w-full h-2.5 rounded-full cursor-pointer mb-4 overflow-hidden group"
-                        style={{ background: "rgba(255,255,255,0.08)" }}>
+                        role="progressbar"
+                        aria-valuenow={Math.round(current)}
+                        aria-valuemax={Math.round(duration || 1)}
+                        style={{
+                            position: "relative", width: "100%", height: 6,
+                            borderRadius: 6, cursor: "pointer", marginBottom: 18,
+                            background: "rgba(255,255,255,0.07)",
+                        }}
+                        className="group"
+                    >
+                        {/* Buffered */}
+                        <div style={{
+                            position: "absolute", inset: "0 auto 0 0",
+                            borderRadius: 6, width: `${bufferedPct}%`,
+                            background: "rgba(255,255,255,0.11)",
+                            transition: "width 0.5s ease",
+                        }} />
 
-                        {/* Buffered range */}
-                        <div className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
-                            style={{ width: `${bufferedPct}%`, background: "rgba(255,255,255,0.12)" }} />
+                        {/* Played — gradient, glow while playing */}
+                        <div style={{
+                            position: "absolute", inset: "0 auto 0 0",
+                            borderRadius: 6, width: `${playedPct}%`,
+                            background: "linear-gradient(90deg,#8b5cf6 0%,#3b82f6 100%)",
+                            boxShadow: playing ? "0 0 10px rgba(139,92,246,0.55)" : "none",
+                            transition: playing ? "none" : "width 0.15s ease",
+                        }} />
 
-                        {/* Played range — always visible, gradient fill */}
-                        <div className="absolute inset-y-0 left-0 rounded-full transition-all"
-                            style={{
-                                width: `${playedPct}%`,
-                                background: "linear-gradient(90deg, #8b5cf6 0%, #3b82f6 100%)",
-                                boxShadow: playing ? "0 0 8px rgba(139,92,246,0.6)" : "none",
-                                transition: playing ? "none" : "width 0.2s ease",
-                            }} />
-
-                        {/* Thumb — always visible (not just on hover) */}
-                        <div
-                            className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-white shadow-lg
-                                ring-2 ring-violet-400/50 transition-all group-hover:scale-125"
-                            style={{ left: `calc(${playedPct}% - 7px)` }} />
+                        {/* Thumb — always visible */}
+                        <div style={{
+                            position: "absolute", top: "50%", transform: "translateY(-50%)",
+                            left: `calc(${playedPct}% - 7px)`,
+                            width: 14, height: 14, borderRadius: "50%",
+                            background: "#fff",
+                            boxShadow: "0 2px 8px rgba(0,0,0,0.4), 0 0 0 2px rgba(139,92,246,0.5)",
+                            transition: "left 0.1s linear, transform 0.15s ease",
+                        }}
+                            className="group-hover:scale-125"
+                        />
                     </div>
 
-                    {/* ── Controls ── */}
-                    <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                            <button onClick={() => skip(-10)} title="−10s"
-                                className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/8
-                                    flex items-center justify-center text-slate-400 hover:text-white transition-all text-xs font-bold">
-                                −10
-                            </button>
+                    {/* ── Controls row ── */}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        {/* Playback controls */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            {/* Skip −10 */}
+                            <button onClick={() => skip(-10)} title="Back 10 s"
+                                style={{
+                                    width: 32, height: 32, borderRadius: "50%",
+                                    background: "rgba(255,255,255,0.05)",
+                                    border: "1px solid rgba(255,255,255,0.09)",
+                                    color: "#94a3b8", fontSize: 11, fontWeight: 700,
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    cursor: "pointer", transition: "all 0.2s",
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.background="rgba(255,255,255,0.1)"; e.currentTarget.style.color="#fff"; }}
+                                onMouseLeave={e => { e.currentTarget.style.background="rgba(255,255,255,0.05)"; e.currentTarget.style.color="#94a3b8"; }}
+                            >−10</button>
 
-                            {/* Main play/pause */}
-                            <button onClick={toggle} disabled={isLoading}
-                                className="w-11 h-11 rounded-full flex items-center justify-center transition-all text-base
-                                    bg-gradient-to-br from-violet-600 to-blue-600 text-white
-                                    hover:from-violet-500 hover:to-blue-500 active:scale-95
-                                    hover:shadow-lg hover:shadow-violet-500/40
-                                    disabled:opacity-40 disabled:cursor-not-allowed">
+                            {/* Play / Pause — main CTA */}
+                            <button onClick={toggle} disabled={isLoading} title={playing ? "Pause" : "Play"}
+                                style={{
+                                    width: 44, height: 44, borderRadius: "50%",
+                                    background: isLoading ? "rgba(139,92,246,0.4)" : "linear-gradient(135deg,#7c3aed,#2563eb)",
+                                    border: "none", color: "#fff", fontSize: 15,
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    cursor: isLoading ? "not-allowed" : "pointer",
+                                    boxShadow: "0 4px 20px rgba(124,58,237,0.35)",
+                                    transition: "all 0.2s",
+                                }}
+                                onMouseEnter={e => { if (!isLoading) { e.currentTarget.style.boxShadow="0 6px 28px rgba(124,58,237,0.55)"; e.currentTarget.style.transform="scale(1.05)"; }}}
+                                onMouseLeave={e => { e.currentTarget.style.boxShadow="0 4px 20px rgba(124,58,237,0.35)"; e.currentTarget.style.transform="scale(1)"; }}
+                            >
                                 {isLoading
-                                    ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                    : playing ? "⏸" : "▶"
+                                    ? <span style={{ width:16,height:16,border:"2px solid rgba(255,255,255,0.3)",borderTopColor:"#fff",borderRadius:"50%",display:"inline-block",animation:"spin .8s linear infinite" }} />
+                                    : playing
+                                        ? <svg width="14" height="14" viewBox="0 0 14 14" fill="white"><rect x="2" y="1" width="4" height="12" rx="1.5"/><rect x="8" y="1" width="4" height="12" rx="1.5"/></svg>
+                                        : <svg width="14" height="14" viewBox="0 0 14 14" fill="white" style={{marginLeft:2}}><polygon points="2,1 13,7 2,13"/></svg>
                                 }
                             </button>
 
-                            <button onClick={() => skip(10)} title="+10s"
-                                className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/8
-                                    flex items-center justify-center text-slate-400 hover:text-white transition-all text-xs font-bold">
-                                +10
-                            </button>
+                            {/* Skip +10 */}
+                            <button onClick={() => skip(10)} title="Forward 10 s"
+                                style={{
+                                    width: 32, height: 32, borderRadius: "50%",
+                                    background: "rgba(255,255,255,0.05)",
+                                    border: "1px solid rgba(255,255,255,0.09)",
+                                    color: "#94a3b8", fontSize: 11, fontWeight: 700,
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    cursor: "pointer", transition: "all 0.2s",
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.background="rgba(255,255,255,0.1)"; e.currentTarget.style.color="#fff"; }}
+                                onMouseLeave={e => { e.currentTarget.style.background="rgba(255,255,255,0.05)"; e.currentTarget.style.color="#94a3b8"; }}
+                            >+10</button>
                         </div>
 
                         {/* Volume */}
-                        <div className="flex items-center gap-2">
-                            <button onClick={toggleMute}
-                                className="text-slate-400 hover:text-white transition-colors w-5 text-sm text-center">
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <button onClick={toggleMute} title={muted ? "Unmute" : "Mute"}
+                                style={{ background:"none",border:"none",cursor:"pointer",color:"#64748b",fontSize:15,padding:0,transition:"color 0.15s",lineHeight:1 }}
+                                onMouseEnter={e=>e.currentTarget.style.color="#fff"}
+                                onMouseLeave={e=>e.currentTarget.style.color="#64748b"}
+                            >
                                 {muted || volume === 0 ? "🔇" : volume < 0.5 ? "🔉" : "🔊"}
                             </button>
                             <input type="range" min="0" max="1" step="0.05"
                                 value={muted ? 0 : volume}
                                 onChange={changeVolume}
-                                className="w-20 h-1 accent-violet-500 cursor-pointer" />
+                                style={{ width: 72, cursor: "pointer" }}
+                                className="accent-violet-500 h-1"
+                            />
                         </div>
                     </div>
                 </>
@@ -289,6 +374,9 @@ export default function AudioPlayer({ filePath, fileName }) {
                 @keyframes audioBar {
                     from { transform: scaleY(0.4); }
                     to   { transform: scaleY(1); }
+                }
+                @keyframes spin {
+                    to { transform: rotate(360deg); }
                 }
             `}</style>
         </div>

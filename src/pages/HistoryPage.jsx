@@ -131,7 +131,7 @@ export default function HistoryPage() {
         return () => window.removeEventListener("click", h);
     }, [profileOpen]);
 
-    const handleLogout = () => { clearSession(); window.location.href = "/login"; };
+    const handleLogout = () => { clearSession(); window.location.replace("/login"); };
 
     const confirmDelete = async () => {
         if (!deleteTarget) return;

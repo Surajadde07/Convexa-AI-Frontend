@@ -37,7 +37,9 @@ export default function MiniAudioPlayer({ filePath, playingId, callId, onPlay, o
         setLoadState("idle");
         const audio = audioRef.current;
         if (!audio || !filePath) return;
-        audio.src = `${BASE_URL}${filePath}`;
+        // Issue #1 frontend fix — encode path segments for legacy DB rows
+        const safeSrc = BASE_URL + filePath.split("/").map(encodeURIComponent).join("/");
+        audio.src = safeSrc;
         audio.load();
     }, [filePath]);
 
@@ -104,42 +106,89 @@ export default function MiniAudioPlayer({ filePath, playingId, callId, onPlay, o
     const isError   = loadState === "error";
 
     return (
-        <div className="flex items-center gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
+        <div style={{ display:"flex", alignItems:"center", gap:7, flexShrink:0 }}
+            onClick={e => e.stopPropagation()}>
             <audio ref={audioRef} preload="none" />
 
+            {/* Play / Pause / Error / Loading button */}
             <button
                 onClick={toggle}
                 disabled={isError}
                 title={isError ? "Audio unavailable" : isPlaying ? "Pause" : "Play audio"}
-                className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all border text-xs
-                    ${isError
-                        ? "bg-red-500/10 border-red-500/20 text-red-500 cursor-not-allowed"
+                style={{
+                    width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    border: isError
+                        ? "1px solid rgba(239,68,68,0.25)"
                         : isPlaying
-                            ? "bg-violet-500/20 border-violet-500/40 text-violet-300 hover:bg-violet-500/30"
-                            : "bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-white hover:border-white/20"
-                    }`}>
-                {isError ? "✕" : isLoading ? (
-                    <span className="w-3 h-3 border border-violet-400/40 border-t-violet-400 rounded-full animate-spin block" />
-                ) : isPlaying ? "⏸" : "▶"}
+                            ? "1px solid rgba(139,92,246,0.45)"
+                            : "1px solid rgba(255,255,255,0.1)",
+                    background: isError
+                        ? "rgba(239,68,68,0.1)"
+                        : isPlaying
+                            ? "linear-gradient(135deg,rgba(124,58,237,0.3),rgba(37,99,235,0.25))"
+                            : "rgba(255,255,255,0.05)",
+                    cursor: isError ? "not-allowed" : "pointer",
+                    boxShadow: isPlaying ? "0 0 10px rgba(139,92,246,0.25)" : "none",
+                    transition: "all 0.2s",
+                }}
+                onMouseEnter={e => {
+                    if (!isError && !isPlaying) {
+                        e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+                        e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)";
+                    }
+                }}
+                onMouseLeave={e => {
+                    if (!isError && !isPlaying) {
+                        e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+                        e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)";
+                    }
+                }}
+            >
+                {isError ? (
+                    <span style={{ fontSize:11, color:"#f87171" }}>✕</span>
+                ) : isLoading ? (
+                    <span style={{
+                        width:10, height:10, display:"block",
+                        border:"1.5px solid rgba(167,139,250,0.35)",
+                        borderTopColor:"#a78bfa", borderRadius:"50%",
+                        animation:"miniSpin .7s linear infinite",
+                    }} />
+                ) : isPlaying ? (
+                    /* SVG pause icon — more precise than emoji */
+                    <svg width="9" height="11" viewBox="0 0 9 11" fill="none">
+                        <rect x="0.5" y="0.5" width="2.5" height="10" rx="1" fill="rgb(196,181,253)" />
+                        <rect x="6" y="0.5" width="2.5" height="10" rx="1" fill="rgb(196,181,253)" />
+                    </svg>
+                ) : (
+                    /* SVG play icon */
+                    <svg width="9" height="11" viewBox="0 0 9 11" fill="none" style={{ marginLeft:1 }}>
+                        <polygon points="0,0.5 9,5.5 0,10.5" fill="#94a3b8" />
+                    </svg>
+                )}
             </button>
 
+            {/* Animated waveform bars while playing */}
             {isPlaying && !isLoading && !isError && (
-                <span className="flex gap-px items-end h-3">
-                    {[0, 1, 2].map(i => (
-                        <span key={i}
-                            className="w-0.5 rounded-full bg-violet-400"
-                            style={{
-                                height: `${40 + i * 20}%`,
-                                animation: `miniAudioBar 0.8s ease-in-out ${i * 0.15}s infinite alternate`,
-                            }} />
+                <span style={{ display:"flex", gap:2, alignItems:"flex-end", height:12 }}>
+                    {[0,1,2].map(i => (
+                        <span key={i} style={{
+                            width: 2.5, borderRadius: 2,
+                            background: "linear-gradient(180deg,#a78bfa,#60a5fa)",
+                            height: `${40 + i * 20}%`,
+                            animation: `miniAudioBar 0.75s ease-in-out ${i * 0.15}s infinite alternate`,
+                        }} />
                     ))}
                 </span>
             )}
 
             <style>{`
                 @keyframes miniAudioBar {
-                    from { transform: scaleY(0.4); }
+                    from { transform: scaleY(0.35); }
                     to   { transform: scaleY(1); }
+                }
+                @keyframes miniSpin {
+                    to { transform: rotate(360deg); }
                 }
             `}</style>
         </div>

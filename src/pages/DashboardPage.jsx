@@ -676,7 +676,7 @@ export default function DashboardPage() {
         return () => window.removeEventListener("click", handler);
     }, [profileOpen]);
 
-    const handleLogout = () => { clearSession(); window.location.href = "/login"; };
+    const handleLogout = () => { clearSession(); window.location.replace("/login"); };
 
     const handleUploadSuccess = () => {
         fetchCalls();
