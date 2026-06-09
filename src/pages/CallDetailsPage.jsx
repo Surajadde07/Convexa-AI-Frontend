@@ -6,6 +6,7 @@ import {
 import api from "../services/api.js";
 import logo from "../assets/CONVEXA_AI_logo.png";
 import AudioPlayer from "../components/AudioPlayer.jsx";
+import { parseInsights } from "../utils/insightsFormatter.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UTILITIES  (same helpers used in Dashboard so output is consistent)
@@ -129,7 +130,7 @@ export default function CallDetailsPage() {
     const strengths  = parseList(call.strengths);
     const improvements = parseList(call.improvements);
     const keywords   = parseList(call.keywords);
-    const insights   = parseMarkdownToBullets(call.insights);
+    const insights   = parseInsights(call.insights);
 
     const TABS = [
         { id: "overview",    label: "📋 Overview" },
@@ -273,18 +274,39 @@ export default function CallDetailsPage() {
                             </div>
                         )}
 
-                        {/* AI Insights */}
+                        {/* AI Insights — structured sections */}
                         {insights.length > 0 && (
                             <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5">
                                 <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-4">🧠 AI Insights</p>
-                                <ul className="space-y-2.5">
-                                    {insights.map((ins, i) => (
-                                        <li key={i} className="flex items-start gap-2.5">
-                                            <span className="mt-2 w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
-                                            <span className="text-sm text-slate-300 leading-relaxed">{ins}</span>
-                                        </li>
-                                    ))}
-                                </ul>
+                                {insights[0]?.bullets ? (
+                                    <ul className="space-y-2.5">
+                                        {insights[0].bullets.map((line, i) => (
+                                            <li key={i} className="flex items-start gap-2.5">
+                                                <span className="mt-2 w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
+                                                <span className="text-sm text-slate-300 leading-relaxed">{line}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : (
+                                    <div className="space-y-2.5">
+                                        {insights.map(section => (
+                                            <div key={section.key}
+                                                className="flex items-start gap-3 p-3.5 rounded-xl border"
+                                                style={{ background: section.bg, borderColor: section.border }}>
+                                                <span className="text-lg flex-shrink-0 mt-0.5">{section.emoji}</span>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-xs font-bold uppercase tracking-wide mb-1"
+                                                        style={{ color: section.color }}>
+                                                        {section.label}
+                                                    </p>
+                                                    <p className="text-sm text-slate-300 leading-relaxed">
+                                                        {section.value || <span className="text-slate-600 italic">—</span>}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
 

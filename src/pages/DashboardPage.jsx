@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
+import { parseInsights } from "../utils/insightsFormatter.js";
 import {
     PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
     AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -448,7 +449,7 @@ function CallDetailPanel({ call }) {
     const strengths   = parseList(call.strengths);
     const improvements = parseList(call.improvements);
     const keywords    = parseList(call.keywords);
-    const insights    = parseMarkdownToBullets(call.insights);
+    const insights    = parseInsights(call.insights);
     const TRANSCRIPT_PREVIEW = 600;
     const longTranscript = call.transcript && call.transcript.length > TRANSCRIPT_PREVIEW;
 
@@ -551,18 +552,41 @@ function CallDetailPanel({ call }) {
                 </div>
             )}
 
-            {/* AI Insights */}
+            {/* AI Insights — structured sections */}
             {insights.length > 0 && (
                 <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4">
                     <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-3">🧠 AI Insights</p>
-                    <ul className="space-y-2">
-                        {insights.map((insight, i) => (
-                            <li key={i} className="flex items-start gap-2.5">
-                                <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
-                                <span className="text-sm text-slate-300 leading-relaxed">{insight}</span>
-                            </li>
-                        ))}
-                    </ul>
+                    {insights[0]?.bullets ? (
+                        // Fallback: no canonical labels found — render as bullets
+                        <ul className="space-y-2">
+                            {insights[0].bullets.map((line, i) => (
+                                <li key={i} className="flex items-start gap-2.5">
+                                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
+                                    <span className="text-sm text-slate-300 leading-relaxed">{line}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    ) : (
+                        // Structured: render each section as a labelled row
+                        <div className="space-y-2.5">
+                            {insights.map(section => (
+                                <div key={section.key}
+                                    className="flex items-start gap-3 p-3 rounded-xl border"
+                                    style={{ background: section.bg, borderColor: section.border }}>
+                                    <span className="text-base flex-shrink-0 mt-0.5">{section.emoji}</span>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-bold uppercase tracking-wide mb-0.5"
+                                            style={{ color: section.color }}>
+                                            {section.label}
+                                        </p>
+                                        <p className="text-sm text-slate-300 leading-relaxed">
+                                            {section.value || <span className="text-slate-600 italic">—</span>}
+                                        </p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
 
