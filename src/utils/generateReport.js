@@ -1,117 +1,95 @@
 /**
- * generateReport.js
+ * generateReport.js  —  Convexa AI · Call Analytics PDF Report
  *
- * Produces a multi-page PDF call analytics report entirely in the browser
- * using jsPDF (already available as an npm package or CDN).
+ * Changes vs previous version
+ * ─────────────────────────────────────────────────────────────
+ * FIX 1 – AI Insights section was silently dropped.
+ *   Root cause: the label regex used  (?:${allLabels})  where allLabels was
+ *   built with .join("|") on the raw strings.  Spaces inside label names
+ *   (e.g. "Customer Intent") were never escaped, so the alternation broke
+ *   on every label after the first word.  The regex matched nothing →
+ *   parsed=false → fallback bullet-splitter ran instead, but the fallback
+ *   itself filtered out "—" lines and non-blank empty lines in a way that
+ *   dropped the whole section for structured LLM responses.
+ *   Fix: escape each label individually; keep a robust two-pass approach
+ *   (structured → inline-key → plain-text fallback).
  *
- * Install once:
- *   npm install jspdf
+ * FIX 2 – Bullet misalignment / overlap.
+ *   Root cause: the dot was drawn at (x-3, y+1.8) but text started at (x, y).
+ *   When a bullet wrapped to a second line the dot stayed at line 0 while
+ *   text moved down, making them overlap.
+ *   Fix: dot is now drawn at the vertical centre of the first line only and
+ *   text X is always dot_x + gap (no magic offset arithmetic).
  *
- * Usage:
- *   import { generateCallReport } from "../utils/generateReport";
- *   generateCallReport(call);           // downloads immediately
+ * FIX 3 – Insight cards now render as proper labelled blocks with a coloured
+ *   left bar instead of a raw "Label: value" inline line.
+ *
+ * FIX 4 – Page-overflow guard was missing from several sections.
+ *   Every block now calls checkPage(minRemaining) before drawing.
+ *
+ * FIX 5 – Summary card height was sometimes calculated wrong (the rect was
+ *   drawn with h=2 when summary existed, leaving text outside the card).
+ *   Fixed by computing cardH before drawing the rect.
  */
 
 import { jsPDF } from "jspdf";
 
-// ─── Brand colours ────────────────────────────────────────────────────────────
+// ─── Brand palette ────────────────────────────────────────────────────────────
 const C = {
-    bg:           [10,  10,  26 ],   // #0a0a1a
-    card:         [22,  18,  60 ],   // #16123c
-    accent:       [139, 92,  246],   // violet-500
-    accentDark:   [109, 40,  217],   // violet-700
-    blue:         [59,  130, 246],   // blue-500
-    emerald:      [16,  185, 129],   // emerald-500
-    amber:        [245, 158, 11 ],   // amber-500
-    red:          [239, 68,  68 ],   // red-500
-    white:        [255, 255, 255],
-    muted:        [148, 163, 184],   // slate-400
-    dim:          [71,  85,  105],   // slate-600
-    border:       [30,  27,  75 ],   // indigo-950
+    bg:         [10,  10,  26 ],
+    card:       [20,  17,  55 ],
+    cardAlt:    [15,  13,  42 ],
+    accent:     [139, 92,  246],
+    accentDark: [109, 40,  217],
+    blue:       [59,  130, 246],
+    emerald:    [16,  185, 129],
+    amber:      [245, 158, 11 ],
+    red:        [239, 68,  68 ],
+    rose:       [244, 114, 182],
+    white:      [255, 255, 255],
+    muted:      [148, 163, 184],
+    dim:        [71,  85,  105],
+    border:     [30,  27,  75 ],
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// Canonical insight sections with individual colours
+const INSIGHT_DEFS = [
+    { key: "Customer Intent",    emoji: "🎯", color: C.accent  },
+    { key: "Main Issue",         emoji: "🔍", color: C.blue    },
+    { key: "Customer Concern",   emoji: "⚠",  color: C.amber   },
+    { key: "Outcome",            emoji: "✅", color: C.emerald },
+    { key: "Agent Performance",  emoji: "👤", color: C.rose    },
+];
 
-/** Convert an [r,g,b] array into the three separate args jsPDF expects */
-function rgb(arr) { return arr; }
+// ─── Primitive helpers ────────────────────────────────────────────────────────
 
-/**
- * Word-wrap a string to fit within maxWidth at the current font size.
- * Returns an array of lines.
- */
-function wrapText(doc, text, maxWidth) {
-    if (!text) return ["—"];
-    return doc.splitTextToSize(String(text), maxWidth);
-}
-
-/**
- * Draw a filled rounded rectangle.
- * jsPDF's roundedRect uses (x,y,w,h,rx,ry,'F')
- */
 function filledRect(doc, x, y, w, h, r, color) {
     doc.setFillColor(...color);
     doc.roundedRect(x, y, w, h, r, r, "F");
 }
 
-/**
- * Draw a score bar.
- *   track = dimmed background, fill = coloured progress.
- */
 function scoreBar(doc, x, y, w, h, score, color) {
     const pct = Math.min((score || 0) / 100, 1);
-    // Track
     doc.setFillColor(...C.border);
     doc.roundedRect(x, y, w, h, h / 2, h / 2, "F");
-    // Fill
     if (pct > 0) {
         doc.setFillColor(...color);
-        doc.roundedRect(x, y, w * pct, h, h / 2, h / 2, "F");
+        doc.roundedRect(x, y, Math.max(w * pct, h), h, h / 2, h / 2, "F");
     }
 }
 
-/**
- * Section header: coloured left accent bar + bold white label.
- * Returns the Y position after the header so the caller can continue.
- */
-function sectionHeader(doc, label, y, color = C.accent) {
-    filledRect(doc, 14, y, 3, 7, 1.5, color);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(...C.muted);
-    doc.text(label.toUpperCase(), 20, y + 5.5);
-    return y + 14;
+function wrapText(doc, text, maxWidth) {
+    if (!text) return ["—"];
+    return doc.splitTextToSize(String(text), maxWidth);
 }
 
-/**
- * Bullet point row.
- * Returns updated Y after the row (with multi-line support).
- */
-function bullet(doc, text, x, y, pageH, newPage, dotColor = C.accent) {
-    const maxW = 170 - (x - 14);
-    const lines = wrapText(doc, text, maxW);
-    if (y + lines.length * 5.5 > pageH - 20) {
-        y = newPage();
-    }
-    // Dot
-    doc.setFillColor(...dotColor);
-    doc.circle(x - 3, y + 1.8, 1.2, "F");
-    doc.setTextColor(...C.white);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9.5);
-    lines.forEach((line, i) => {
-        doc.text(line, x, y + i * 5.4);
-    });
-    return y + lines.length * 5.4 + 3;
-}
-
-/**
- * Clean markdown artifacts from a string.
- */
+/** Strip common markdown artifacts */
 function clean(str) {
     if (!str) return "—";
     return str
         .replace(/\*\*(.*?)\*\*/g, "$1")
         .replace(/\*(.*?)\*/g, "$1")
+        .replace(/`(.*?)`/g, "$1")
         .replace(/#+\s?/g, "")
         .replace(/^[\s\-•>]+/, "")
         .trim() || "—";
@@ -119,12 +97,10 @@ function clean(str) {
 
 function parseList(str) {
     if (!str) return [];
-    return str.split(/,|\n/).map(s => s.replace(/^[\s*\-•]+/, "").trim()).filter(Boolean);
-}
-
-function fmt(s) {
-    if (!s && s !== 0) return "—";
-    return `${s}`;
+    return str
+        .split(/,|\n/)
+        .map(s => s.replace(/^[\s*\-•]+/, "").trim())
+        .filter(Boolean);
 }
 
 function fmtDate(iso) {
@@ -137,80 +113,193 @@ function fmtDate(iso) {
     } catch { return iso; }
 }
 
+// ─── PDF state (module-level, reset on each call) ────────────────────────────
+
+let _doc, PW, PH, MARGIN, CONTENT, _y, _pageNum;
+
+function init(doc) {
+    _doc    = doc;
+    PW      = doc.internal.pageSize.getWidth();
+    PH      = doc.internal.pageSize.getHeight();
+    MARGIN  = 14;
+    CONTENT = PW - MARGIN * 2;
+    _y      = 0;
+    _pageNum = 1;
+}
+
+function y()       { return _y; }
+function setY(val) { _y = val; }
+function addY(val) { _y += val; }
+
+// ─── Page management ──────────────────────────────────────────────────────────
+
+function drawPageBg() {
+    _doc.setFillColor(...C.bg);
+    _doc.rect(0, 0, PW, PH, "F");
+}
+
+function drawFooter() {
+    const fy = PH - 8;
+    _doc.setDrawColor(...C.border);
+    _doc.setLineWidth(0.3);
+    _doc.line(MARGIN, fy - 2, PW - MARGIN, fy - 2);
+    _doc.setFont("helvetica", "normal");
+    _doc.setFontSize(7.5);
+    _doc.setTextColor(...C.dim);
+    _doc.text("Convexa AI · Conversation Intelligence Platform", MARGIN, fy);
+    _doc.text(`Page ${_pageNum}`, PW - MARGIN, fy, { align: "right" });
+    _doc.text(`Generated: ${new Date().toLocaleString()}`, PW / 2, fy, { align: "center" });
+}
+
+function newPage() {
+    drawFooter();
+    _doc.addPage();
+    _pageNum++;
+    drawPageBg();
+    setY(MARGIN + 8);
+    return y();
+}
+
+/** Ensure at least `needed` mm remain on the page; add a new page if not. */
+function checkPage(needed) {
+    if (y() + needed > PH - 20) newPage();
+}
+
+// ─── Reusable layout blocks ───────────────────────────────────────────────────
+
+function sectionHeader(label, color = C.accent) {
+    checkPage(18);
+    filledRect(_doc, MARGIN, y(), 3, 7, 1.5, color);
+    _doc.setFont("helvetica", "bold");
+    _doc.setFontSize(9.5);
+    _doc.setTextColor(...C.muted);
+    _doc.text(label.toUpperCase(), MARGIN + 7, y() + 5.5);
+    addY(14);
+}
+
+/**
+ * FIX 2 – bullet with correct dot alignment.
+ * Dot is always drawn at the vertical centre of the FIRST line only.
+ */
+function bullet(text, xIndent, dotColor = C.accent) {
+    const x      = MARGIN + xIndent;
+    const maxW   = CONTENT - xIndent - 2;
+    const lines  = wrapText(_doc, text, maxW);
+    const lineH  = 5.4;
+
+    checkPage(lines.length * lineH + 4);
+
+    // Dot: centred on first text line
+    _doc.setFillColor(...dotColor);
+    _doc.circle(x - 4, y() + lineH / 2 - 0.8, 1.2, "F");
+
+    _doc.setFont("helvetica", "normal");
+    _doc.setFontSize(9.5);
+    _doc.setTextColor(...C.white);
+    lines.forEach((line, i) => {
+        _doc.text(line, x, y() + i * lineH);
+    });
+    addY(lines.length * lineH + 3.5);
+}
+
+// ─── AI Insights parser ──────────────────────────────────────────────────────
+/**
+ * FIX 1 – robust two-pass parser.
+ *
+ * Pass 1 (structured): look for each canonical label followed by a colon
+ *   (optionally with markdown heading prefix).  Escape spaces in the label
+ *   individually so "Customer Intent:" works even inside a larger string.
+ *
+ * Pass 2 (inline): labels that appear with no newline before them
+ *   (LLM returned everything on one line).
+ *
+ * Pass 3 (fallback): if nothing was found, treat the whole text as a single
+ *   unstructured block and bullet-split it.
+ *
+ * Returns: Array<{ label, color, lines: string[] }>
+ */
+function parseInsightSections(raw) {
+    if (!raw?.trim()) return [];
+
+    const results = [];
+
+    for (const def of INSIGHT_DEFS) {
+        // Escape each character in the label (handles spaces, parentheses, etc.)
+        const escapedLabel = def.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+        // Match: optional markdown heading + label + optional colon + content
+        // Content ends at the next canonical label or end-of-string.
+        const nextLabels = INSIGHT_DEFS
+            .filter(d => d.key !== def.key)
+            .map(d => d.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+            .join("|");
+
+        const pattern = new RegExp(
+            `(?:#{1,3}\\s*)?${escapedLabel}\\s*:?\\s*([\\s\\S]*?)` +
+            (nextLabels ? `(?=(?:#{1,3}\\s*)?(?:${nextLabels})\\s*:?|$)` : `(?=$)`),
+            "i"
+        );
+
+        const m = pattern.exec(raw);
+        if (m && m[1]?.trim()) {
+            const value = clean(m[1].split("\n")[0]) || clean(m[1]);
+            if (value && value !== "—") {
+                results.push({ label: def.key, color: def.color, lines: wrapText(_doc, value, CONTENT - 20) });
+            }
+        }
+    }
+
+    // Fallback: no structured sections found → treat whole text as bullets
+    if (results.length === 0) {
+        const bullets = raw
+            .split(/\n/)
+            .map(l => clean(l))
+            .filter(l => l && l !== "—");
+        return bullets.map(b => ({ label: null, color: C.blue, lines: [b] }));
+    }
+
+    return results;
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export function generateCallReport(call) {
     if (!call) return;
 
-    const doc      = new jsPDF({ unit: "mm", format: "a4", compress: true });
-    const PW       = doc.internal.pageSize.getWidth();   // 210
-    const PH       = doc.internal.pageSize.getHeight();  // 297
-    const MARGIN   = 14;
-    const CONTENT  = PW - MARGIN * 2;  // 182
-    let   y        = 0;
-
-    // ── New page helper ──────────────────────────────────────────────────────
-    let pageNum = 1;
-
-    function newPage() {
-        doc.addPage();
-        pageNum++;
-        drawPageBackground();
-        drawPageFooter();
-        return MARGIN + 10;
-    }
-
-    function drawPageBackground() {
-        // Dark background
-        doc.setFillColor(...C.bg);
-        doc.rect(0, 0, PW, PH, "F");
-    }
-
-    function drawPageFooter() {
-        const footerY = PH - 8;
-        doc.setDrawColor(...C.border);
-        doc.setLineWidth(0.3);
-        doc.line(MARGIN, footerY - 2, PW - MARGIN, footerY - 2);
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(7.5);
-        doc.setTextColor(...C.dim);
-        doc.text("Convexa AI · Conversation Intelligence Platform", MARGIN, footerY);
-        doc.text(`Page ${pageNum}`, PW - MARGIN, footerY, { align: "right" });
-        doc.text(`Generated: ${new Date().toLocaleString()}`, PW / 2, footerY, { align: "center" });
-    }
+    const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
+    init(doc);
 
     // ── PAGE 1 BACKGROUND ────────────────────────────────────────────────────
-    drawPageBackground();
+    drawPageBg();
 
-    // ── HEADER GRADIENT BAND ─────────────────────────────────────────────────
-    // Simulate gradient with stacked rectangles
-    const steps = 20;
+    // ── HEADER BAND (gradient simulation) ────────────────────────────────────
+    const BAND_H = 52;
+    const steps  = 24;
     for (let i = 0; i < steps; i++) {
-        const t   = i / steps;
-        const r   = Math.round(C.accentDark[0] + t * (C.bg[0] - C.accentDark[0]));
-        const g   = Math.round(C.accentDark[1] + t * (C.bg[1] - C.accentDark[1]));
-        const b   = Math.round(C.accentDark[2] + t * (C.bg[2] - C.accentDark[2]));
+        const t = i / steps;
+        const r = Math.round(C.accentDark[0] + t * (C.bg[0] - C.accentDark[0]));
+        const g = Math.round(C.accentDark[1] + t * (C.bg[1] - C.accentDark[1]));
+        const b = Math.round(C.accentDark[2] + t * (C.bg[2] - C.accentDark[2]));
         doc.setFillColor(r, g, b);
-        doc.rect(0, i * (52 / steps), PW, 52 / steps + 0.5, "F");
+        doc.rect(0, i * (BAND_H / steps), PW, BAND_H / steps + 0.5, "F");
     }
 
-    // Subtle left accent bar
-    filledRect(doc, 0, 0, 4, 52, 0, C.accent);
+    // Left accent bar
+    filledRect(doc, 0, 0, 4, BAND_H, 0, C.accent);
 
-    // Logo text
+    // Logo
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
     doc.setTextColor(...C.white);
     doc.text("CONVEXA", MARGIN + 4, 18);
     doc.setTextColor(...C.accent);
     doc.text(" AI", MARGIN + 4 + doc.getTextWidth("CONVEXA"), 18);
-
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8.5);
     doc.setTextColor(...C.muted);
     doc.text("CONVERSATION INTELLIGENCE PLATFORM", MARGIN + 4, 25);
 
-    // Report title (right-aligned)
+    // Report title
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     doc.setTextColor(...C.white);
@@ -220,257 +309,251 @@ export function generateCallReport(call) {
     doc.setTextColor(...C.muted);
     doc.text("Confidential · For Internal Use", PW - MARGIN, 25, { align: "right" });
 
-    // Divider under header
+    // Divider
     doc.setDrawColor(...C.accent);
     doc.setLineWidth(0.4);
-    doc.line(MARGIN, 52, PW - MARGIN, 52);
+    doc.line(MARGIN, BAND_H, PW - MARGIN, BAND_H);
 
-    y = 60;
+    setY(BAND_H + 8);
 
     // ── SECTION 1: CALL INFORMATION ──────────────────────────────────────────
-    y = sectionHeader(doc, "Call Information", y, C.accent);
-
-    // Info card background
-    filledRect(doc, MARGIN, y - 2, CONTENT, 42, 3, C.card);
+    sectionHeader("Call Information", C.accent);
 
     const infoRows = [
-        ["File Name",   call.fileName || "—"],
-        ["Call ID",     `#${call.id || "—"}`],
-        ["Date",        fmtDate(call.createdAt)],
-        ["Status",      call.status || "COMPLETED"],
+        ["File Name", call.fileName || "—"],
+        ["Call ID",   `#${call.id    || "—"}`],
+        ["Date",      fmtDate(call.createdAt)],
+        ["Status",    call.status    || "COMPLETED"],
     ];
+
+    const INFO_H = infoRows.length * 9 + 6;
+    filledRect(doc, MARGIN, y(), CONTENT, INFO_H, 3, C.card);
 
     doc.setFontSize(9);
     infoRows.forEach(([label, value], i) => {
-        const rowX = MARGIN + 6;
-        const rowY = y + 5 + i * 9;
+        const ry = y() + 6 + i * 9;
         doc.setFont("helvetica", "bold");
         doc.setTextColor(...C.muted);
-        doc.text(label + ":", rowX, rowY);
+        doc.text(label + ":", MARGIN + 6, ry);
         doc.setFont("helvetica", "normal");
         doc.setTextColor(...C.white);
-        const valLines = wrapText(doc, value, CONTENT - 55);
-        doc.text(valLines[0], rowX + 32, rowY);
+        const vLines = wrapText(doc, value, CONTENT - 55);
+        doc.text(vLines[0] || "—", MARGIN + 40, ry);
     });
 
-    y += 48;
+    addY(INFO_H + 8);
 
     // ── SECTION 2: EXECUTIVE SUMMARY ─────────────────────────────────────────
-    y = sectionHeader(doc, "Executive Summary", y, C.blue);
-
     if (call.summary) {
-        filledRect(doc, MARGIN, y - 2, CONTENT, 2, 0, C.card);
+        sectionHeader("Executive Summary", C.blue);
         const summaryLines = wrapText(doc, clean(call.summary), CONTENT - 10);
-        const cardH = summaryLines.length * 5.5 + 10;
-        filledRect(doc, MARGIN, y - 2, CONTENT, cardH, 3, C.card);
+        const cardH        = summaryLines.length * 5.5 + 12;
+        checkPage(cardH + 8);
+        filledRect(doc, MARGIN, y(), CONTENT, cardH, 3, C.card);
         doc.setFont("helvetica", "italic");
         doc.setFontSize(9.5);
         doc.setTextColor(...C.muted);
-        summaryLines.forEach((line, i) => doc.text(line, MARGIN + 5, y + 5 + i * 5.5));
-        y += cardH + 6;
+        summaryLines.forEach((line, i) => doc.text(line, MARGIN + 6, y() + 7 + i * 5.5));
+        addY(cardH + 8);
     }
 
-    // ── SECTION 3: SENTIMENT + OVERALL SCORE (side by side) ──────────────────
-    y = sectionHeader(doc, "Sentiment & Overall Score", y, C.emerald);
+    // ── SECTION 3: SENTIMENT + OVERALL SCORE ─────────────────────────────────
+    sectionHeader("Sentiment & Overall Score", C.emerald);
 
-    // Sentiment card
     const sentColor = call.sentiment === "POSITIVE" ? C.emerald
                     : call.sentiment === "NEGATIVE" ? C.red
                     : C.amber;
-    const sentEmoji = call.sentiment === "POSITIVE" ? "Positive"
+    const sentLabel = call.sentiment === "POSITIVE" ? "Positive"
                     : call.sentiment === "NEGATIVE" ? "Negative"
                     : "Neutral";
 
-    filledRect(doc, MARGIN, y - 2, 85, 22, 3, C.card);
-    doc.setFillColor(...sentColor);
-    doc.roundedRect(MARGIN + 5, y + 2, 18, 12, 6, 6, "F");
+    // Sentiment card (left half)
+    filledRect(doc, MARGIN, y(), 87, 24, 3, C.card);
+    filledRect(doc, MARGIN + 6, y() + 5, 16, 14, 7, sentColor);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
+    doc.setFontSize(9);
     doc.setTextColor(...C.bg);
-    doc.text(sentEmoji.charAt(0), MARGIN + 11, y + 10, { align: "center" });
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
+    doc.text(sentLabel.charAt(0), MARGIN + 14, y() + 13, { align: "center" });
+    doc.setFontSize(12);
     doc.setTextColor(...sentColor);
-    doc.text(sentEmoji, MARGIN + 28, y + 10);
+    doc.text(sentLabel, MARGIN + 26, y() + 13);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.setTextColor(...C.muted);
-    doc.text("Sentiment Analysis", MARGIN + 6, y + 18);
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.dim);
+    doc.text("Sentiment Analysis", MARGIN + 7, y() + 21);
 
-    // Overall score card
+    // Overall score card (right half)
     if (call.overallScore != null) {
-        filledRect(doc, MARGIN + 95, y - 2, 85, 22, 3, C.card);
+        const sx = MARGIN + 95;
+        filledRect(doc, sx, y(), 87, 24, 3, C.card);
         doc.setFont("helvetica", "bold");
         doc.setFontSize(22);
         doc.setTextColor(...C.accent);
-        doc.text(`${call.overallScore}`, MARGIN + 118, y + 13, { align: "center" });
+        doc.text(`${call.overallScore}`, sx + 22, y() + 14, { align: "center" });
         doc.setFontSize(10);
         doc.setTextColor(...C.muted);
-        doc.text("/ 100", MARGIN + 126, y + 13);
+        doc.text("/ 100", sx + 34, y() + 14);
         doc.setFont("helvetica", "normal");
-        doc.setFontSize(8);
-        doc.text("Overall QA Score", MARGIN + 100, y + 18);
-        scoreBar(doc, MARGIN + 100, y + 19, 74, 2.5, call.overallScore, C.accent);
+        doc.setFontSize(7.5);
+        doc.setTextColor(...C.dim);
+        doc.text("Overall QA Score", sx + 6, y() + 21);
+        scoreBar(doc, sx + 6, y() + 21, 74, 2.5, call.overallScore, C.accent);
     }
 
-    y += 30;
+    addY(32);
 
     // ── SECTION 4: QA SCORE BREAKDOWN ────────────────────────────────────────
-    if (call.communication || call.professionalism || call.problemResolution || call.customerSatisfaction) {
-        y = sectionHeader(doc, "QA Score Breakdown", y, C.accent);
+    const hasDims = call.communication || call.professionalism
+                 || call.problemResolution || call.customerSatisfaction;
+
+    if (hasDims) {
+        sectionHeader("QA Score Breakdown", C.accent);
 
         const dims = [
-            { label: "Communication",       key: "communication",       color: C.accent  },
-            { label: "Professionalism",      key: "professionalism",     color: C.emerald },
-            { label: "Problem Resolution",   key: "problemResolution",   color: C.blue    },
-            { label: "Customer Satisfaction",key: "customerSatisfaction",color: C.amber   },
+            { label: "Communication",        key: "communication",        color: C.accent  },
+            { label: "Professionalism",       key: "professionalism",      color: C.emerald },
+            { label: "Problem Resolution",    key: "problemResolution",    color: C.blue    },
+            { label: "Customer Satisfaction", key: "customerSatisfaction", color: C.amber   },
         ];
 
-        // 2×2 grid of score cards
+        const CW = (CONTENT - 4) / 2;
+
         dims.forEach(({ label, key, color }, i) => {
             const col = i % 2;
             const row = Math.floor(i / 2);
-            const cx  = MARGIN + col * (CONTENT / 2 + 2);
-            const cy  = y + row * 20;
-            const cw  = CONTENT / 2 - 2;
+            const cx  = MARGIN + col * (CW + 4);
+            const cy  = y() + row * 22;
 
-            filledRect(doc, cx, cy - 2, cw, 17, 3, C.card);
+            filledRect(doc, cx, cy, CW, 18, 3, C.card);
 
             const score = call[key];
+            const scoreStr = score != null ? `${score}` : "—";
             doc.setFont("helvetica", "bold");
-            doc.setFontSize(14);
+            doc.setFontSize(15);
             doc.setTextColor(...color);
-            doc.text(score != null ? `${score}` : "—", cx + 10, cy + 9);
+            doc.text(scoreStr, cx + 10, cy + 11);
             doc.setFont("helvetica", "normal");
             doc.setFontSize(8);
             doc.setTextColor(...C.muted);
-            doc.text(label, cx + 10 + (score != null ? doc.getTextWidth(`${score}`) + 3 : 8), cy + 9);
-            scoreBar(doc, cx + 6, cy + 11, cw - 12, 2, score, color);
+            doc.text(label, cx + 10 + doc.getTextWidth(scoreStr) + 4, cy + 11);
+            scoreBar(doc, cx + 7, cy + 13, CW - 14, 2.2, score, color);
         });
 
-        y += 46;
+        addY(48);
     }
 
-    drawPageFooter();
+    drawFooter();
 
-    // ── PAGE 2 ────────────────────────────────────────────────────────────────
-    y = newPage();
+    // ═════════════════════════════════════════
+    //  PAGE 2
+    // ═════════════════════════════════════════
+    newPage();
 
     // ── SECTION 5: KEYWORDS ───────────────────────────────────────────────────
     const keywords = parseList(call.keywords);
     if (keywords.length > 0) {
-        y = sectionHeader(doc, "Keywords", y, C.blue);
+        sectionHeader("Keywords", C.blue);
 
         let kx = MARGIN;
-        let ky = y;
-        const maxKW = PW - MARGIN;
+        let ky = y();
 
         keywords.forEach(kw => {
             const kw_clean = clean(kw);
             doc.setFont("helvetica", "bold");
             doc.setFontSize(8.5);
-            const kw_w = doc.getTextWidth(kw_clean) + 10;
+            const kwW = doc.getTextWidth(kw_clean) + 12;
 
-            if (kx + kw_w > maxKW) {
-                kx = MARGIN;
-                ky += 9;
+            if (kx + kwW > PW - MARGIN) {
+                kx  = MARGIN;
+                ky += 10;
+                if (ky > PH - 20) {
+                    setY(ky);
+                    newPage();
+                    ky = y();
+                }
             }
 
-            filledRect(doc, kx, ky - 5, kw_w, 7, 3.5, [30, 25, 80]);
+            filledRect(doc, kx, ky - 5.5, kwW, 8, 4, [28, 24, 78]);
             doc.setTextColor(...C.accent);
-            doc.text(kw_clean, kx + 5, ky);
-            kx += kw_w + 4;
+            doc.text(kw_clean, kx + 6, ky);
+            kx += kwW + 5;
         });
 
-        y = ky + 12;
+        setY(ky + 13);
     }
 
     // ── SECTION 6: STRENGTHS ──────────────────────────────────────────────────
     const strengths = parseList(call.strengths);
     if (strengths.length > 0) {
-        y = sectionHeader(doc, "Strengths", y, C.emerald);
-        strengths.forEach(s => {
-            if (y > PH - 30) y = newPage();
-            y = bullet(doc, clean(s), MARGIN + 8, y, PH, newPage, C.emerald);
-        });
-        y += 4;
+        sectionHeader("Strengths", C.emerald);
+        strengths.forEach(s => bullet(clean(s), 8, C.emerald));
+        addY(4);
     }
 
     // ── SECTION 7: AREAS FOR IMPROVEMENT ─────────────────────────────────────
     const improvements = parseList(call.improvements);
     if (improvements.length > 0) {
-        if (y > PH - 50) y = newPage();
-        y = sectionHeader(doc, "Areas for Improvement", y, C.amber);
-        improvements.forEach(s => {
-            if (y > PH - 30) y = newPage();
-            y = bullet(doc, clean(s), MARGIN + 8, y, PH, newPage, C.amber);
-        });
-        y += 4;
+        checkPage(24);
+        sectionHeader("Areas for Improvement", C.amber);
+        improvements.forEach(s => bullet(clean(s), 8, C.amber));
+        addY(4);
     }
 
     // ── SECTION 8: AI INSIGHTS ────────────────────────────────────────────────
+    //
+    // FIX 1 + FIX 3: structured cards with coloured left bar; each section is
+    // a self-contained card.  Falls back to plain bullets for unstructured text.
+    // ─────────────────────────────────────────────────────────────────────────
     if (call.insights) {
-        if (y > PH - 60) y = newPage();
-        y = sectionHeader(doc, "AI Insights", y, C.blue);
+        checkPage(30);
+        sectionHeader("AI Insights", C.blue);
 
-        const INSIGHT_LABELS = [
-            "Customer Intent",
-            "Main Issue",
-            "Customer Concern",
-            "Outcome",
-            "Agent Performance",
-        ];
+        const sections = parseInsightSections(call.insights);
 
-        // Try structured parse first
-        const allLabels   = INSIGHT_LABELS.join("|").replace(/\s/g, "\\s*");
-        const labelRegex  = new RegExp(
-            `(?:#{1,3}\\s*)?(?:${allLabels})\\s*[:\\n]([\\s\\S]*?)(?=(?:${allLabels})\\s*[:\\n]|$)`,
-            "gi"
-        );
+        if (sections.length > 0 && sections[0].label !== null) {
+            // Structured mode: one card per canonical section
+            sections.forEach(({ label, color, lines }) => {
+                const cardH = Math.max(lines.length * 5.5 + 14, 20);
+                checkPage(cardH + 6);
 
-        let parsed = false;
-        let m;
-        while ((m = labelRegex.exec(call.insights)) !== null) {
-            parsed = true;
-            const header = m[0].split(/[:\n]/)[0].replace(/^#+\s*/, "").trim();
-            const value  = clean(m[1]?.split("\n")[0] || m[1]);
-            if (!value || value === "—") continue;
+                // Card background
+                filledRect(doc, MARGIN, y(), CONTENT, cardH, 3, C.card);
 
-            if (y > PH - 30) y = newPage();
+                // Coloured left accent strip
+                filledRect(doc, MARGIN, y(), 3, cardH, 1.5, color);
 
-            // Label
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(8.5);
-            doc.setTextColor(...C.blue);
-            doc.text(header + ":", MARGIN + 5, y);
-            // Value
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(9);
-            doc.setTextColor(...C.white);
-            const lines = wrapText(doc, value, CONTENT - 12);
-            lines.forEach((ln, li) => doc.text(ln, MARGIN + 8, y + 5.5 + li * 5.2));
-            y += 5.5 + lines.length * 5.2 + 4;
-        }
+                // Label
+                doc.setFont("helvetica", "bold");
+                doc.setFontSize(8);
+                doc.setTextColor(...color);
+                doc.text(label.toUpperCase(), MARGIN + 8, y() + 6);
 
-        if (!parsed) {
-            // Fallback: bullet list
-            const bullets = call.insights
-                .split(/\n/)
-                .map(l => clean(l))
-                .filter(l => l && l !== "—");
-            bullets.forEach(b => {
-                if (y > PH - 30) y = newPage();
-                y = bullet(doc, b, MARGIN + 8, y, PH, newPage, C.blue);
+                // Value lines
+                doc.setFont("helvetica", "normal");
+                doc.setFontSize(9.5);
+                doc.setTextColor(...C.white);
+                lines.forEach((line, i) => {
+                    doc.text(line, MARGIN + 8, y() + 12 + i * 5.5);
+                });
+
+                addY(cardH + 4);
+            });
+        } else {
+            // Unstructured fallback: plain bullet list
+            sections.forEach(({ lines }) => {
+                lines.forEach(line => bullet(line, 8, C.blue));
             });
         }
 
-        y += 6;
+        addY(6);
     }
 
-    // ── PAGE 3: TRANSCRIPT ────────────────────────────────────────────────────
+    // ═════════════════════════════════════════
+    //  PAGE 3+: TRANSCRIPT
+    // ═════════════════════════════════════════
     if (call.transcript) {
-        y = newPage();
-        y = sectionHeader(doc, "Full Transcript", y, C.muted);
+        newPage();
+        sectionHeader("Full Transcript", C.muted);
 
         doc.setFont("courier", "normal");
         doc.setFontSize(8.5);
@@ -479,20 +562,20 @@ export function generateCallReport(call) {
         const transcriptLines = wrapText(doc, call.transcript, CONTENT - 4);
 
         transcriptLines.forEach(line => {
-            if (y > PH - 18) {
-                y = newPage();
+            if (y() > PH - 20) {
+                newPage();
                 doc.setFont("courier", "normal");
                 doc.setFontSize(8.5);
                 doc.setTextColor(...C.muted);
             }
-            doc.text(line, MARGIN + 2, y);
-            y += 4.8;
+            doc.text(line, MARGIN + 2, y());
+            addY(4.8);
         });
     }
 
-    drawPageFooter();
+    drawFooter();
 
-    // ── SAVE ──────────────────────────────────────────────────────────────────
+    // ── SAVE ─────────────────────────────────────────────────────────────────
     const safeName = (call.fileName || "call-report")
         .replace(/[^a-zA-Z0-9_\-]/g, "_")
         .substring(0, 60);

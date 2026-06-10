@@ -97,6 +97,15 @@ export const authAPI = {
    * @returns {Promise<AuthResponse>}
    */
   login: (data) => api.post("/api/auth/login", data),
+
+  /**
+   * Authenticate with a Google ID token.
+   * Backend verifies the token with Google, creates / looks up the user,
+   * and returns the same AuthResponse (JWT + user) as regular login.
+   * @param {{ credential: string }} data — credential is the raw Google ID token
+   * @returns {Promise<AuthResponse>}
+   */
+  googleLogin: (data) => api.post("/api/auth/google", data),
 };
 
 export default api;
