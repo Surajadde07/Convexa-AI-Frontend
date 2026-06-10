@@ -5,6 +5,7 @@ import {
     XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import api, { getUser, clearSession } from "../services/api.js";
+import { logoutAndRedirect } from "../components/ProtectedRoute";
 import logo from "../assets/CONVEXA_AI_logo.png";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -82,7 +83,7 @@ export default function AnalyticsPage() {
         return () => window.removeEventListener("click", h);
     }, [profileOpen]);
 
-    const handleLogout = () => { clearSession(); window.location.href = "/login"; };
+    const handleLogout = () => { logoutAndRedirect(); };
 
     // ── Derived data ─────────────────────────────────────────────────────────
     const total        = calls.length;

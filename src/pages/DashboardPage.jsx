@@ -6,6 +6,7 @@ import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid,
 } from "recharts";
 import api, { getUser, clearSession } from "../services/api.js";
+import { logoutAndRedirect } from "../components/ProtectedRoute";
 import logo from "../assets/CONVEXA_AI_logo.png";
 import MiniAudioPlayer from "../components/MiniAudioPlayer.jsx";
 
@@ -676,7 +677,9 @@ export default function DashboardPage() {
         return () => window.removeEventListener("click", handler);
     }, [profileOpen]);
 
-    const handleLogout = () => { clearSession(); window.location.replace("/login"); };
+    const handleLogout = () => {
+        logoutAndRedirect();
+    };
 
     const handleUploadSuccess = () => {
         fetchCalls();
