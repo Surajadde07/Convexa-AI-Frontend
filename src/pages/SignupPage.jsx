@@ -9,7 +9,7 @@ import logo from "../assets/CONVEXA_AI_logo.png";
 // ─────────────────────────────────────────
 function GoogleAuthButton({ label, onSuccess, onError }) {
   const [loading, setLoading] = useState(false);
-
+  console.log("CLIENT ID =", import.meta.env.VITE_GOOGLE_CLIENT_ID);
   const handleClick = useCallback(() => {
     if (!window.google?.accounts?.id) {
       onError("Google Sign-In is not available. Please try again.");

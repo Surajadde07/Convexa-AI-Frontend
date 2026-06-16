@@ -367,7 +367,7 @@ export default function AnalyticsPage() {
                             {/* Calls per day */}
                             <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
                                 <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-5">Calls Per Day</p>
-                                {loading ? <Skeleton className="h-56" /> : callsPerDay.length < 2 ? (
+                                {loading ? <Skeleton className="h-56" /> : callsPerDay.length === 0 ? (
                                     <div className="flex items-center justify-center h-48 text-slate-500 text-sm flex-col gap-2">
                                         <span className="text-3xl">📅</span>
                                         <span>Upload more calls to see daily activity</span>

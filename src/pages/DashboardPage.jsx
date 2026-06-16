@@ -42,8 +42,8 @@ function parseList(str) {
 
 const SENT_CONFIG = {
     POSITIVE: { color: "#10b981", bg: "rgba(16,185,129,0.12)", border: "rgba(16,185,129,0.3)", label: "Positive", emoji: "😊" },
-    NEGATIVE: { color: "#ef4444", bg: "rgba(239,68,68,0.12)",  border: "rgba(239,68,68,0.3)",  label: "Negative", emoji: "😔" },
-    NEUTRAL:  { color: "#f59e0b", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.3)", label: "Neutral",  emoji: "😐" },
+    NEGATIVE: { color: "#ef4444", bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.3)", label: "Negative", emoji: "😔" },
+    NEUTRAL: { color: "#f59e0b", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.3)", label: "Neutral", emoji: "😐" },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -132,20 +132,20 @@ function UploadModal({ onClose, onSuccess }) {
     // After bytes are sent the connection stays open while the server runs
     // Whisper + AI analysis + DB save — we show "Analyzing" during that wait.
     const PHASE_LABELS = {
-        uploading:  "Uploading audio…",
-        analyzing:  "Analyzing conversation…",
-        saving:     "Saving results…",
+        uploading: "Uploading audio…",
+        analyzing: "Analyzing conversation…",
+        saving: "Saving results…",
     };
     const PHASE_SUBS = {
-        uploading:  "Sending file to server",
-        analyzing:  "Whisper is transcribing · AI is scoring",
-        saving:     "Writing to database",
+        uploading: "Sending file to server",
+        analyzing: "Whisper is transcribing · AI is scoring",
+        saving: "Writing to database",
     };
 
     const handleFile = (f) => {
         if (!f) return;
         const validExt = /\.(mp3|wav|m4a|ogg|webm|flac|mp4)$/i.test(f.name);
-        const validType = ["audio/mpeg","audio/wav","audio/mp4","audio/ogg","audio/webm","audio/flac","video/mp4"].includes(f.type);
+        const validType = ["audio/mpeg", "audio/wav", "audio/mp4", "audio/ogg", "audio/webm", "audio/flac", "video/mp4"].includes(f.type);
         if (!validExt && !validType) {
             setErrorMsg("Please upload an audio file (mp3, wav, m4a, flac, ogg…)");
             setState("error");
@@ -447,10 +447,10 @@ function CallDetailPanel({ call }) {
     if (!call) return null;
 
     const sentCfg = SENT_CONFIG[call.sentiment] || SENT_CONFIG.NEUTRAL;
-    const strengths   = parseList(call.strengths);
+    const strengths = parseList(call.strengths);
     const improvements = parseList(call.improvements);
-    const keywords    = parseList(call.keywords);
-    const insights    = parseInsights(call.insights);
+    const keywords = parseList(call.keywords);
+    const insights = parseInsights(call.insights);
     const TRANSCRIPT_PREVIEW = 600;
     const longTranscript = call.transcript && call.transcript.length > TRANSCRIPT_PREVIEW;
 
@@ -617,9 +617,9 @@ function CallDetailPanel({ call }) {
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">📊 QA Dimensions</p>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                         {[
-                            { label: "Communication",    key: "communication",        color: "#8b5cf6" },
-                            { label: "Problem Resolution", key: "problemResolution",  color: "#3b82f6" },
-                            { label: "Professionalism",  key: "professionalism",      color: "#10b981" },
+                            { label: "Communication", key: "communication", color: "#8b5cf6" },
+                            { label: "Problem Resolution", key: "problemResolution", color: "#3b82f6" },
+                            { label: "Professionalism", key: "professionalism", color: "#10b981" },
                             { label: "Cust. Satisfaction", key: "customerSatisfaction", color: "#f59e0b" },
                         ].map(({ label, key, color }) => (
                             <div key={key} className="flex flex-col items-center gap-2 p-3 rounded-xl bg-white/4 border border-white/8">
@@ -639,16 +639,16 @@ function CallDetailPanel({ call }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-    const [calls, setCalls]               = useState([]);
-    const [loading, setLoading]           = useState(true);
-    const [error, setError]               = useState(null);
-    const [profileOpen, setProfileOpen]   = useState(false);
-    const [uploadOpen, setUploadOpen]     = useState(false);
+    const [calls, setCalls] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [profileOpen, setProfileOpen] = useState(false);
+    const [uploadOpen, setUploadOpen] = useState(false);
     const [selectedCall, setSelectedCall] = useState(null);
-    const [toast, setToast]               = useState(null);
-    const [playingId, setPlayingId]       = useState(null); // mini audio player
+    const [toast, setToast] = useState(null);
+    const [playingId, setPlayingId] = useState(null); // mini audio player
 
-    const user      = getUser();
+    const user = getUser();
     const firstName = user?.name?.split(" ")[0] ?? "there";
 
     const fetchCalls = useCallback(async () => {
@@ -687,15 +687,15 @@ export default function DashboardPage() {
     };
 
     // ── Analytics ─────────────────────────────────────────────────────────────
-    const totalCalls     = calls.length;
-    const positiveCalls  = calls.filter(c => c.sentiment === "POSITIVE").length;
-    const negativeCalls  = calls.filter(c => c.sentiment === "NEGATIVE").length;
-    const neutralCalls   = calls.filter(c => c.sentiment === "NEUTRAL").length;
-    const avgScore       = totalCalls > 0 ? (calls.reduce((s, c) => s + (c.overallScore || 0), 0) / totalCalls).toFixed(1) : 0;
-    const bestScore      = totalCalls > 0 ? Math.max(...calls.map(c => c.overallScore || 0)) : 0;
+    const totalCalls = calls.length;
+    const positiveCalls = calls.filter(c => c.sentiment === "POSITIVE").length;
+    const negativeCalls = calls.filter(c => c.sentiment === "NEGATIVE").length;
+    const neutralCalls = calls.filter(c => c.sentiment === "NEUTRAL").length;
+    const avgScore = totalCalls > 0 ? (calls.reduce((s, c) => s + (c.overallScore || 0), 0) / totalCalls).toFixed(1) : 0;
+    const bestScore = totalCalls > 0 ? Math.max(...calls.map(c => c.overallScore || 0)) : 0;
     const positivePercent = totalCalls > 0 ? ((positiveCalls / totalCalls) * 100).toFixed(1) : 0;
     const negativePercent = totalCalls > 0 ? ((negativeCalls / totalCalls) * 100).toFixed(1) : 0;
-    const neutralPercent  = totalCalls > 0 ? ((neutralCalls  / totalCalls) * 100).toFixed(1) : 0;
+    const neutralPercent = totalCalls > 0 ? ((neutralCalls / totalCalls) * 100).toFixed(1) : 0;
 
     const sentimentCounts = { POSITIVE: positiveCalls, NEGATIVE: negativeCalls, NEUTRAL: neutralCalls };
     const dominantSentiment = totalCalls > 0
@@ -704,7 +704,7 @@ export default function DashboardPage() {
 
     const chartData = [
         { name: "Positive", value: positiveCalls },
-        { name: "Neutral",  value: neutralCalls  },
+        { name: "Neutral", value: neutralCalls },
         { name: "Negative", value: negativeCalls },
     ];
 
@@ -715,6 +715,7 @@ export default function DashboardPage() {
         const d = new Date(c.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
         timelineMap[d] = (timelineMap[d] || 0) + 1;
     });
+
     const timelineData = Object.entries(timelineMap).slice(-10).map(([date, count]) => ({ date, calls: count }));
 
     // Keywords
@@ -755,9 +756,9 @@ export default function DashboardPage() {
                     {/* Nav links */}
                     <nav className="hidden md:flex items-center gap-1">
                         {[
-                            { label: "Dashboard",    path: "/dashboard"  },
-                            { label: "Call History", path: "/history"    },
-                            { label: "Analytics",    path: "/analytics"  },
+                            { label: "Dashboard", path: "/dashboard" },
+                            { label: "Call History", path: "/history" },
+                            { label: "Analytics", path: "/analytics" },
                         ].map(({ label, path }) => (
                             <Link key={label} to={path}
                                 className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all
@@ -889,11 +890,11 @@ export default function DashboardPage() {
                         Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-32" />)
                     ) : (
                         <>
-                            <StatCard label="Total Calls"  value={totalCalls}  icon="📞" accent="#8b5cf6" />
-                            <StatCard label="Avg QA Score" value={avgScore}    icon="⭐" accent="#3b82f6"
+                            <StatCard label="Total Calls" value={totalCalls} icon="📞" accent="#8b5cf6" />
+                            <StatCard label="Avg QA Score" value={avgScore} icon="⭐" accent="#3b82f6"
                                 sub={Number(avgScore) >= 70 ? "Good" : Number(avgScore) >= 50 ? "Fair" : "Low"} />
-                            <StatCard label="Positive %"   value={`${positivePercent}%`} icon="😊" accent="#10b981" />
-                            <StatCard label="Negative %"   value={`${negativePercent}%`} icon="😔" accent="#ef4444" />
+                            <StatCard label="Positive %" value={`${positivePercent}%`} icon="😊" accent="#10b981" />
+                            <StatCard label="Negative %" value={`${negativePercent}%`} icon="😔" accent="#ef4444" />
                         </>
                     )}
                 </div>
@@ -905,11 +906,11 @@ export default function DashboardPage() {
                         <div className="w-full h-3 rounded-full overflow-hidden flex gap-0.5"
                             style={{ background: "rgba(255,255,255,0.06)" }}>
                             <div style={{ width: `${positivePercent}%`, background: "#10b981", transition: "width 1s ease" }} className="rounded-l-full" />
-                            <div style={{ width: `${neutralPercent}%`,  background: "#f59e0b", transition: "width 1s ease" }} />
+                            <div style={{ width: `${neutralPercent}%`, background: "#f59e0b", transition: "width 1s ease" }} />
                             <div style={{ width: `${negativePercent}%`, background: "#ef4444", transition: "width 1s ease" }} className="rounded-r-full" />
                         </div>
                         <div className="flex flex-wrap gap-4 mt-3">
-                            {[["#10b981","Positive",positivePercent],["#f59e0b","Neutral",neutralPercent],["#ef4444","Negative",negativePercent]].map(([c,l,v]) => (
+                            {[["#10b981", "Positive", positivePercent], ["#f59e0b", "Neutral", neutralPercent], ["#ef4444", "Negative", negativePercent]].map(([c, l, v]) => (
                                 <div key={l} className="flex items-center gap-1.5">
                                     <div className="w-2.5 h-2.5 rounded-full" style={{ background: c }} />
                                     <span className="text-xs text-slate-400">{l}</span>
@@ -937,7 +938,7 @@ export default function DashboardPage() {
                             🚀 Upload First Call
                         </button>
                         <div className="flex flex-wrap justify-center gap-3 mt-8 text-xs text-slate-500">
-                            {["🎵 Whisper Transcription","🧠 AI Analysis","📊 QA Scoring","🔑 Keyword Extraction"].map(t => (
+                            {["🎵 Whisper Transcription", "🧠 AI Analysis", "📊 QA Scoring", "🔑 Keyword Extraction"].map(t => (
                                 <span key={t} className="px-3 py-1.5 rounded-full border border-white/8 bg-white/3">{t}</span>
                             ))}
                         </div>
@@ -967,7 +968,7 @@ export default function DashboardPage() {
                                 <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-5">Call Activity Timeline</p>
                                 {loading ? (
                                     <Skeleton className="h-56" />
-                                ) : timelineData.length < 2 ? (
+                                ) : timelineData.length === 0 ? (
                                     <div className="flex flex-col items-center justify-center h-56 text-slate-500 text-sm gap-2">
                                         <span className="text-3xl">📈</span>
                                         <span>Upload more calls to see the timeline</span>
@@ -977,7 +978,7 @@ export default function DashboardPage() {
                                         <AreaChart data={timelineData}>
                                             <defs>
                                                 <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%"  stopColor="#8b5cf6" stopOpacity={0.35} />
+                                                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.35} />
                                                     <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
                                                 </linearGradient>
                                             </defs>
@@ -999,10 +1000,10 @@ export default function DashboardPage() {
                                 <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-5">Average QA Dimensions</p>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                     {[
-                                        { label: "Communication",       key: "communication",       color: "#8b5cf6" },
-                                        { label: "Problem Resolution",  key: "problemResolution",   color: "#3b82f6" },
-                                        { label: "Professionalism",     key: "professionalism",     color: "#10b981" },
-                                        { label: "Cust. Satisfaction",  key: "customerSatisfaction",color: "#f59e0b" },
+                                        { label: "Communication", key: "communication", color: "#8b5cf6" },
+                                        { label: "Problem Resolution", key: "problemResolution", color: "#3b82f6" },
+                                        { label: "Professionalism", key: "professionalism", color: "#10b981" },
+                                        { label: "Cust. Satisfaction", key: "customerSatisfaction", color: "#f59e0b" },
                                     ].map(({ label, key, color }) => (
                                         <div key={key} className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/4 border border-white/8 hover:border-white/15 transition-all">
                                             <ScoreRing score={avgQA(key)} size={72} stroke={6} color={color} />
