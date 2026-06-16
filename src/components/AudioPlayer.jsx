@@ -1,6 +1,22 @@
 /**
  * AudioPlayer.jsx
  *
+ * ── CLOUDINARY MIGRATION ─────────────────────────────────────────────────────
+ * Audio is now served directly from Cloudinary, not from this app's backend.
+ * `cloudinaryUrl` is a complete, already-encoded HTTPS URL
+ * (e.g. https://res.cloudinary.com/your-cloud/video/upload/v1700000000/
+ * convexa-ai-recordings/my_recording.mp3) — it must be used AS-IS.
+ *
+ * Do NOT prefix it with BASE_URL (that was only needed for the old
+ * `/audio/{fileName}` local-disk endpoint, which no longer exists).
+ * Do NOT run it through encodeURIComponent() — Cloudinary URLs are already
+ * fully encoded, and re-encoding would double-encode the `%xx` sequences
+ * and produce a broken URL.
+ *
+ * Prop renamed: `filePath` → `cloudinaryUrl` to make this contract explicit
+ * at every call site.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
  * ISSUE 2 FIX — Progress bar / thumb desynchronisation:
  *
  * ROOT CAUSE:
@@ -40,8 +56,6 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
-
 function fmt(s) {
     if (!isFinite(s) || isNaN(s) || s < 0) return "0:00";
     const m = Math.floor(s / 60);
@@ -49,7 +63,7 @@ function fmt(s) {
     return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
-export default function AudioPlayer({ filePath, fileName }) {
+export default function AudioPlayer({ cloudinaryUrl, fileName }) {
     const audioRef  = useRef(null);
     const trackRef  = useRef(null);
     const rafRef    = useRef(null);
@@ -198,9 +212,11 @@ export default function AudioPlayer({ filePath, fileName }) {
     const isLoading   = status === "loading";
     const isError     = status === "error";
 
-    if (!filePath) return null;
+    if (!cloudinaryUrl) return null;
 
-    const safeSrc = BASE_URL + filePath.split("/").map(encodeURIComponent).join("/");
+    // Use the Cloudinary URL exactly as returned by the backend — it is
+    // already a complete, fully-encoded HTTPS URL. No BASE_URL prefix,
+    // no encodeURIComponent() — both would corrupt the URL.
 
     return (
         <div style={{
@@ -211,7 +227,7 @@ export default function AudioPlayer({ filePath, fileName }) {
             borderRadius: 20,
             padding: "20px 22px",
         }}>
-            <audio ref={audioRef} src={safeSrc} preload="metadata" />
+            <audio ref={audioRef} src={cloudinaryUrl} preload="metadata" />
 
             {/* ── Header: icon · title · time ── */}
             <div className="flex items-center gap-3 mb-5">

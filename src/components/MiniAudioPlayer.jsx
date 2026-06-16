@@ -1,6 +1,16 @@
 /**
  * MiniAudioPlayer.jsx
  *
+ * ── CLOUDINARY MIGRATION ─────────────────────────────────────────────────────
+ * `cloudinaryUrl` is a complete, already-encoded HTTPS URL returned directly
+ * by Cloudinary. It must be used AS-IS — no BASE_URL prefix (that was only
+ * needed for the old `/audio/{fileName}` local-disk endpoint, which no
+ * longer exists) and no encodeURIComponent() (Cloudinary URLs are already
+ * fully encoded; re-encoding double-encodes the %xx sequences and breaks
+ * the URL). Prop renamed from `filePath` to `cloudinaryUrl` to make this
+ * contract explicit at every call site.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
  * Root causes fixed (Bug #2):
  *
  * 1. RANDOM PLAYBACK FAILURE — audio.play() is a Promise. If the browser
@@ -9,10 +19,10 @@
  *    swallowed the error and left isPlaying=true showing the wrong UI state.
  *    Fix: catch the rejection, reset state, show error.
  *
- * 2. STALE SRC — when filePath changes (e.g. navigating between calls in
+ * 2. STALE SRC — when the URL changes (e.g. navigating between calls in
  *    history without unmounting), the <audio> element keeps the old src.
  *    The browser may refuse to play or play the wrong file.
- *    Fix: useEffect on filePath — reset error/loaded state and reload.
+ *    Fix: useEffect on cloudinaryUrl — reset error/loaded state and reload.
  *
  * 3. EFFECT CLEANUP — the old code added no cleanup for the "ended" event
  *    listener on the audio element, causing double-fires after re-render.
@@ -24,24 +34,21 @@
 
 import { useEffect, useRef, useState } from "react";
 
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
-
-export default function MiniAudioPlayer({ filePath, playingId, callId, onPlay, onStop }) {
+export default function MiniAudioPlayer({ cloudinaryUrl, playingId, callId, onPlay, onStop }) {
     const audioRef  = useRef(null);
     const isPlaying = playingId === callId;
 
     const [loadState, setLoadState] = useState("idle"); // idle | loading | ready | error
 
-    // ── Sync src and reset when filePath changes ───────────────────────────
+    // ── Sync src and reset when cloudinaryUrl changes ───────────────────────
     useEffect(() => {
         setLoadState("idle");
         const audio = audioRef.current;
-        if (!audio || !filePath) return;
-        // Issue #1 frontend fix — encode path segments for legacy DB rows
-        const safeSrc = BASE_URL + filePath.split("/").map(encodeURIComponent).join("/");
-        audio.src = safeSrc;
+        if (!audio || !cloudinaryUrl) return;
+        // Cloudinary URLs are already complete and fully encoded — use directly
+        audio.src = cloudinaryUrl;
         audio.load();
-    }, [filePath]);
+    }, [cloudinaryUrl]);
 
     // ── Audio element event listeners ──────────────────────────────────────
     useEffect(() => {
@@ -100,7 +107,7 @@ export default function MiniAudioPlayer({ filePath, playingId, callId, onPlay, o
         }
     };
 
-    if (!filePath) return null;
+    if (!cloudinaryUrl) return null;
 
     const isLoading = isPlaying && loadState === "loading";
     const isError   = loadState === "error";

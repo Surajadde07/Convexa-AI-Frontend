@@ -491,7 +491,7 @@ export default function CallDetailsPage() {
                     Instead, we render a hidden <audio> observer below.
                 ── */}
                 <AudioPlayerWithBridge
-                    filePath={call.filePath}
+                    cloudinaryUrl={call.cloudinaryUrl}
                     fileName={call.fileName}
                     seekRef={seekRef}
                     onTimeUpdate={setAudioCurrentSec}
@@ -753,36 +753,30 @@ export default function CallDetailsPage() {
 // AUDIOPLAYER BRIDGE
 //
 // AudioPlayer.jsx does not expose an imperative seek API.
-// This wrapper renders AudioPlayer plus a hidden <audio> element that shares
-// the same src — we listen on that for timeupdate to keep currentSec in sync,
-// and we implement seek by messaging the real audio element via a shared ref.
+// This wrapper renders AudioPlayer plus listens for the real <audio> element
+// it mounts internally, identifying it by matching its `src` against the
+// known cloudinaryUrl. This lets the Timeline tab seek/play the audio and
+// read its current playback position without modifying AudioPlayer.jsx.
 //
-// Better approach: we render AudioPlayer normally and overlay it with a hidden
-// audio element that tracks the same src. But the cleanest solution that
-// doesn't modify AudioPlayer.jsx is to expose the seek function via a
-// data attribute trick or a context.
-//
-// SIMPLEST correct approach that requires no changes to AudioPlayer:
-// render a hidden <audio> with the same src in this component, subscribe to
-// its timeupdate, and when seek is called, set currentTime on that element
-// only. For actual playback we still rely on AudioPlayer's own element.
-//
-// For the "seek AudioPlayer from Timeline" use case, we use a shared
-// broadcast channel via a module-level WeakMap keyed on the audio src.
+// ── CLOUDINARY MIGRATION FIX ─────────────────────────────────────────────────
+// Previously this matched against `BASE_URL_AP + filePath...`, reconstructing
+// a URL pointing at this app's own backend (the old `/audio/{fileName}`
+// local-disk endpoint). That endpoint no longer exists — audio is now served
+// directly from Cloudinary at `cloudinaryUrl`, which is already a complete,
+// fully-encoded absolute HTTPS URL. No reconstruction is needed or correct;
+// the match must simply compare against cloudinaryUrl itself.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BASE_URL_AP = import.meta.env.VITE_API_URL || "http://localhost:8080";
-
-function AudioPlayerWithBridge({ filePath, fileName, seekRef, onTimeUpdate }) {
+function AudioPlayerWithBridge({ cloudinaryUrl, fileName, seekRef, onTimeUpdate }) {
     const probeRef = useRef(null);
 
     // Register seek function
     useEffect(() => {
         seekRef.current = (seconds) => {
             // Find the real audio element rendered by AudioPlayer by scanning
-            // all <audio> tags for a src that matches our file
-            if (!filePath) return;
-            const expected = (BASE_URL_AP + filePath.split("/").map(encodeURIComponent).join("/")).toLowerCase();
+            // all <audio> tags for a src that matches our Cloudinary URL
+            if (!cloudinaryUrl) return;
+            const expected = cloudinaryUrl.toLowerCase();
             const allAudio = Array.from(document.querySelectorAll("audio"));
             const target   = allAudio.find(a => {
                 try { return new URL(a.src).href.toLowerCase() === expected; } catch { return false; }
@@ -793,14 +787,14 @@ function AudioPlayerWithBridge({ filePath, fileName, seekRef, onTimeUpdate }) {
                 target.play().catch(() => {});
             }
         };
-    }, [filePath, seekRef]);
+    }, [cloudinaryUrl, seekRef]);
 
     // Track current time via rAF polling
     useEffect(() => {
         let raf;
         function poll() {
-            if (!filePath) return;
-            const expected = (BASE_URL_AP + filePath.split("/").map(encodeURIComponent).join("/")).toLowerCase();
+            if (!cloudinaryUrl) return;
+            const expected = cloudinaryUrl.toLowerCase();
             const allAudio = Array.from(document.querySelectorAll("audio"));
             const target   = allAudio.find(a => {
                 try { return new URL(a.src).href.toLowerCase() === expected; } catch { return false; }
@@ -811,9 +805,9 @@ function AudioPlayerWithBridge({ filePath, fileName, seekRef, onTimeUpdate }) {
         }
         raf = requestAnimationFrame(poll);
         return () => cancelAnimationFrame(raf);
-    }, [filePath, onTimeUpdate]);
+    }, [cloudinaryUrl, onTimeUpdate]);
 
-    return <AudioPlayer filePath={filePath} fileName={fileName} />;
+    return <AudioPlayer cloudinaryUrl={cloudinaryUrl} fileName={fileName} />;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

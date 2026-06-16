@@ -1043,7 +1043,7 @@ export default function DashboardPage() {
                                                             : "border-white/6 bg-white/2 hover:bg-white/5 hover:border-white/12"}`}>
                                                     {/* Mini audio button */}
                                                     <MiniAudioPlayer
-                                                        filePath={call.filePath}
+                                                        cloudinaryUrl={call.cloudinaryUrl}
                                                         playingId={playingId}
                                                         callId={call.id}
                                                         onPlay={setPlayingId}

@@ -380,7 +380,7 @@ export default function HistoryPage() {
                                         {/* File name + mini player */}
                                         <div className="flex items-center gap-3 min-w-0">
                                             <MiniAudioPlayer
-                                                filePath={call.filePath}
+                                                cloudinaryUrl={call.cloudinaryUrl}
                                                 playingId={playingId}
                                                 callId={call.id}
                                                 onPlay={setPlayingId}
