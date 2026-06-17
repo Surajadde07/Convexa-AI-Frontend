@@ -40,7 +40,7 @@ function UploadForm() {
             formData.append("audio", file);
 
             const response = await axios.post(
-                "http://localhost:8080/api/calls/upload",
+                `${import.meta.env.VITE_API_URL}/api/calls/upload`,
                 formData,
                 {
                     headers: {
