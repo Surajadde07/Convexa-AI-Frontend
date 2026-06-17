@@ -46,9 +46,16 @@
 import { useEffect } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { isAuthenticated, clearSession } from "../services/api";
+import { googleSignOut } from "../services/googleAuth";
 
 // ─── Exported logout helper — import this in every Sign Out button ────────────
 export function logoutAndRedirect() {
+    // 0. Tell GIS/FedCM the user explicitly signed out — without this call,
+    //    Google's FedCM credential-mediation state still treats the browser
+    //    as "signed in" to this site, which can suppress the next prompt()
+    //    or surface "FedCM was disabled based on previous user action".
+    googleSignOut();
+
     // 1. Wipe session data
     clearSession();
     sessionStorage.clear();
