@@ -12,6 +12,18 @@ import { generateCallReport } from "../utils/generateReport.js";
 
 function parseList(str) {
     if (!str) return [];
+    // Try JSON array parse first (new format)
+    if (str.trim().startsWith("[")) {
+        try {
+            const parsed = JSON.parse(str);
+            if (Array.isArray(parsed)) {
+                return parsed.map(s => String(s).trim()).filter(Boolean);
+            }
+        } catch {
+            // fall through to legacy split
+        }
+    }
+    // Legacy format: comma or newline separated string (old records)
     return str.split(/,|\n/).map(s => s.replace(/^[\s*\-•]+/, "").trim()).filter(Boolean);
 }
 
@@ -76,17 +88,9 @@ const PHASE_COLORS = [
 ];
 
 /**
- * TimelinePanel
- *
- * Props:
- *   timeline   — array of { time: "MM:SS", title: string }
- *   loading    — bool
- *   error      — string | null
- *   currentSec — current audio playback position in seconds
- *   onSeek     — (seconds: number) => void
+ * TimelinePanel — unchanged in appearance and props.
  */
 function TimelinePanel({ timeline, loading, error, currentSec, onSeek }) {
-    // Determine active segment: the last segment whose start <= currentSec
     const activeIdx = timeline.reduce((acc, seg, i) => {
         const s = parseTime(seg.time);
         return s <= currentSec ? i : acc;
@@ -96,7 +100,7 @@ function TimelinePanel({ timeline, loading, error, currentSec, onSeek }) {
         return (
             <div className="flex flex-col items-center justify-center gap-3 py-10">
                 <div className="w-8 h-8 border-2 border-violet-500/30 border-t-violet-400 rounded-full animate-spin" />
-                <p className="text-slate-400 text-xs">AI is building the timeline…</p>
+                <p className="text-slate-400 text-xs">Building timeline…</p>
             </div>
         );
     }
@@ -135,7 +139,6 @@ function TimelinePanel({ timeline, loading, error, currentSec, onSeek }) {
                     const color     = PHASE_COLORS[i % PHASE_COLORS.length];
                     const startSec  = parseTime(seg.time);
 
-                    // Duration label: from this seg to next seg (or "end")
                     const nextSec = i + 1 < timeline.length ? parseTime(timeline[i + 1].time) : null;
                     const durSec  = nextSec !== null ? nextSec - startSec : null;
                     const durFmt  = durSec !== null
@@ -151,7 +154,6 @@ function TimelinePanel({ timeline, loading, error, currentSec, onSeek }) {
                                     ? "bg-violet-500/15 border border-violet-500/30 shadow-sm"
                                     : "border border-transparent hover:bg-white/5 hover:border-white/8"}`}
                         >
-                            {/* Timeline dot */}
                             <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 z-10 transition-all
                                 ${isActive ? "shadow-lg" : ""}`}
                                 style={{
@@ -165,19 +167,16 @@ function TimelinePanel({ timeline, loading, error, currentSec, onSeek }) {
                                 )}
                             </div>
 
-                            {/* Timestamp badge */}
                             <span className="text-xs font-mono font-bold flex-shrink-0 w-10"
                                 style={{ color: isActive ? color : isPast ? `${color}80` : "#475569" }}>
                                 {seg.time}
                             </span>
 
-                            {/* Title */}
                             <span className={`text-sm font-medium flex-1 min-w-0 truncate transition-colors
                                 ${isActive ? "text-white" : isPast ? "text-slate-500" : "text-slate-400 group-hover:text-slate-200"}`}>
                                 {seg.title}
                             </span>
 
-                            {/* Duration */}
                             {durFmt && (
                                 <span className="text-xs text-slate-600 font-mono flex-shrink-0">{durFmt}</span>
                             )}
@@ -206,14 +205,21 @@ export default function CallDetailsPage() {
     const [activeTab, setActiveTab]     = useState("overview");
 
     // ── Timeline state ─────────────────────────────────────────────────────
+    //
+    // CHANGED: timeline is no longer fetched on-demand from
+    // POST /api/calls/timeline. It is now stored in call.timeline as a JSON
+    // string (serialized by the controller from the /analyze response).
+    // We parse it once when the call record loads. If parsing fails, or the
+    // field is absent/null (e.g. a record created before this migration), we
+    // fall back to the client-side heuristic exactly as before.
+    //
+    // timelineLoading and timelineError are kept to avoid touching
+    // TimelinePanel's props interface — they are simply set once at load time.
     const [timeline, setTimeline]           = useState([]);
     const [timelineLoading, setTimelineLoading] = useState(false);
     const [timelineError, setTimelineError] = useState(null);
-    const [timelineFetched, setTimelineFetched] = useState(false);
 
     // ── Audio player seek bridge ───────────────────────────────────────────
-    // AudioPlayer exposes no imperative API, so we use a shared ref approach:
-    // we store a seekTo function that AudioPlayer registers via its onReady prop.
     const seekRef = useRef(null);
 
     // ── PDF report state ───────────────────────────────────────────────────
@@ -224,46 +230,49 @@ export default function CallDetailsPage() {
 
     useEffect(() => {
         api.get(`/api/calls/${id}`)
-            .then(r => setCall(r.data))
+            .then(r => {
+                const data = r.data;
+                setCall(data);
+
+                // ── Parse timeline from stored JSON string ─────────────────
+                //
+                // call.timeline is a TEXT column containing a JSON array string
+                // like: [{"time":"00:00","title":"Greeting"}, ...]
+                //
+                // Three possible states:
+                // 1. Valid JSON array  → use it directly
+                // 2. null / empty / "[]" → fall back to client heuristic
+                // 3. Invalid JSON       → fall back to client heuristic
+                //
+                // REMOVED: the old approach of fetching /api/calls/timeline
+                // on tab change. The timeline is now available immediately
+                // without any extra network request.
+                if (data.timeline) {
+                    try {
+                        const parsed = JSON.parse(data.timeline);
+                        if (Array.isArray(parsed) && parsed.length > 0) {
+                            setTimeline(parsed);
+                        } else {
+                            // "[]" stored — fall back
+                            setTimeline(buildFallbackTimeline(data.transcript));
+                        }
+                    } catch {
+                        // Malformed JSON — fall back
+                        setTimeline(buildFallbackTimeline(data.transcript));
+                    }
+                } else {
+                    // Old record without timeline column — fall back
+                    setTimeline(buildFallbackTimeline(data.transcript));
+                }
+            })
             .catch(() => setError("Could not load call details."))
             .finally(() => setLoading(false));
     }, [id]);
 
-    // ── Fetch timeline when tab is first opened ────────────────────────────
-    const fetchTimeline = async (transcript) => {
-        if (timelineFetched || !transcript) return;
-        setTimelineLoading(true);
-        setTimelineError(null);
-        setTimelineFetched(true);
-        try {
-            const res = await fetch(`${BASE_URL}/api/calls/timeline`, {
-                method:  "POST",
-                headers: {
-                    "Content-Type":  "application/json",
-                    "Authorization": `Bearer ${localStorage.getItem("convexa_token")}`,
-                },
-                body: JSON.stringify({ transcript }),
-            });
-            if (!res.ok) throw new Error(`Server returned ${res.status}`);
-            const data = await res.json();
-            // Expected: [{ time: "00:00", title: "Greeting" }, ...]
-            setTimeline(Array.isArray(data) ? data : data.timeline || []);
-        } catch (err) {
-            // Timeline is optional — fall back to a client-side heuristic
-            setTimeline(buildFallbackTimeline(transcript));
-            setTimelineError(null); // don't show error if fallback succeeded
-        } finally {
-            setTimelineLoading(false);
-        }
-    };
-
     /**
      * Fallback timeline generator — works entirely in the browser when the
-     * /api/calls/timeline endpoint is not available yet.
-     *
-     * Heuristic: scans the transcript for speaker turns and common
-     * conversation-phase keywords, assigns rough timestamps based on
-     * estimated 150 wpm reading speed.
+     * stored timeline is absent or invalid.
+     * Kept unchanged from the original implementation.
      */
     function buildFallbackTimeline(transcript) {
         if (!transcript) return [];
@@ -288,7 +297,7 @@ export default function CallDetailsPage() {
             for (let wi = 0; wi < words.length; wi++) {
                 const chunk = words.slice(wi, wi + 6).join(" ").toLowerCase();
                 if (phaseWords.some(kw => chunk.includes(kw))) {
-                    if (wi > lastIdx + 30) {   // at least 30 words after previous marker
+                    if (wi > lastIdx + 30) {
                         const totalSec = Math.round((wi / WPM) * 60);
                         const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
                         const ss = String(totalSec % 60).padStart(2, "0");
@@ -300,7 +309,6 @@ export default function CallDetailsPage() {
             }
         });
 
-        // Always ensure there's a "00:00 Opening" entry
         if (timeline.length === 0 || timeline[0].time !== "00:00") {
             timeline.unshift({ time: "00:00", title: "Opening" });
         }
@@ -313,7 +321,6 @@ export default function CallDetailsPage() {
         if (!call) return;
         setReportLoading(true);
         try {
-            // Dynamic import so jsPDF is only loaded when needed
             const { generateCallReport } = await import("../utils/generateReport.js");
             generateCallReport(call);
         } catch (err) {
@@ -324,12 +331,16 @@ export default function CallDetailsPage() {
         }
     };
 
-    // ── Tab change handler — triggers timeline fetch ───────────────────────
+    // ── Tab change handler ─────────────────────────────────────────────────
+    //
+    // CHANGED: removed the call to fetchTimeline() on tab change.
+    // Timeline is already loaded from call.timeline in the useEffect above.
+    // handleTabChange is kept so the rest of the tab-switching logic is
+    // identical — no other component needs to change.
     const handleTabChange = (tabId) => {
         setActiveTab(tabId);
-        if (tabId === "timeline" && call?.transcript) {
-            fetchTimeline(call.transcript);
-        }
+        // OLD: if (tabId === "timeline" && call?.transcript) { fetchTimeline(call.transcript); }
+        // Timeline is now pre-loaded from call.timeline — no fetch needed.
     };
 
     // ── Seek the AudioPlayer to a given second ─────────────────────────────
@@ -408,7 +419,6 @@ export default function CallDetailsPage() {
                     </div>
 
                     <div className="ml-auto flex items-center gap-3">
-                        {/* ── DOWNLOAD REPORT BUTTON ── */}
                         <button
                             onClick={handleDownloadReport}
                             disabled={reportLoading}
@@ -481,15 +491,6 @@ export default function CallDetailsPage() {
                     )}
                 </div>
 
-                {/* ── AUDIO PLAYER ──
-                    We extend AudioPlayer with two extra props:
-                    - onTimeUpdate: feeds current time to Timeline
-                    - seekRef: lets Timeline seek the player
-                    
-                    AudioPlayer already exposes audioRef — we use the same
-                    seekRef forwarding pattern without modifying AudioPlayer.jsx.
-                    Instead, we render a hidden <audio> observer below.
-                ── */}
                 <AudioPlayerWithBridge
                     cloudinaryUrl={call.cloudinaryUrl}
                     fileName={call.fileName}
@@ -637,7 +638,6 @@ export default function CallDetailsPage() {
                 {/* ── TIMELINE TAB ── */}
                 {activeTab === "timeline" && (
                     <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-                        {/* Timeline panel */}
                         <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-white/5 p-5">
                             <div className="flex items-center justify-between mb-4">
                                 <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">⏱ Conversation Timeline</p>
@@ -656,7 +656,6 @@ export default function CallDetailsPage() {
                             />
                         </div>
 
-                        {/* Active segment detail */}
                         <div className="lg:col-span-3 rounded-2xl border border-white/10 bg-white/5 p-5">
                             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">📋 Transcript at Selected Phase</p>
                             {timeline.length > 0 ? (
@@ -750,31 +749,14 @@ export default function CallDetailsPage() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AUDIOPLAYER BRIDGE
-//
-// AudioPlayer.jsx does not expose an imperative seek API.
-// This wrapper renders AudioPlayer plus listens for the real <audio> element
-// it mounts internally, identifying it by matching its `src` against the
-// known cloudinaryUrl. This lets the Timeline tab seek/play the audio and
-// read its current playback position without modifying AudioPlayer.jsx.
-//
-// ── CLOUDINARY MIGRATION FIX ─────────────────────────────────────────────────
-// Previously this matched against `BASE_URL_AP + filePath...`, reconstructing
-// a URL pointing at this app's own backend (the old `/audio/{fileName}`
-// local-disk endpoint). That endpoint no longer exists — audio is now served
-// directly from Cloudinary at `cloudinaryUrl`, which is already a complete,
-// fully-encoded absolute HTTPS URL. No reconstruction is needed or correct;
-// the match must simply compare against cloudinaryUrl itself.
+// AUDIOPLAYER BRIDGE — unchanged
 // ─────────────────────────────────────────────────────────────────────────────
 
 function AudioPlayerWithBridge({ cloudinaryUrl, fileName, seekRef, onTimeUpdate }) {
     const probeRef = useRef(null);
 
-    // Register seek function
     useEffect(() => {
         seekRef.current = (seconds) => {
-            // Find the real audio element rendered by AudioPlayer by scanning
-            // all <audio> tags for a src that matches our Cloudinary URL
             if (!cloudinaryUrl) return;
             const expected = cloudinaryUrl.toLowerCase();
             const allAudio = Array.from(document.querySelectorAll("audio"));
@@ -789,7 +771,6 @@ function AudioPlayerWithBridge({ cloudinaryUrl, fileName, seekRef, onTimeUpdate 
         };
     }, [cloudinaryUrl, seekRef]);
 
-    // Track current time via rAF polling
     useEffect(() => {
         let raf;
         function poll() {
@@ -811,7 +792,7 @@ function AudioPlayerWithBridge({ cloudinaryUrl, fileName, seekRef, onTimeUpdate 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PHASE TRANSCRIPT — shows the chunk of transcript text for the active segment
+// PHASE TRANSCRIPT — unchanged
 // ─────────────────────────────────────────────────────────────────────────────
 
 function PhaseTranscript({ transcript, timeline, currentSec }) {
@@ -824,9 +805,7 @@ function PhaseTranscript({ transcript, timeline, currentSec }) {
 
     const seg     = timeline[activeIdx];
     const color   = PHASE_COLORS[activeIdx % PHASE_COLORS.length];
-    const totalWords = transcript.split(/\s+/).length;
 
-    // Approximate character range for this segment
     const startPct = parseTime(seg.time) / Math.max(parseTime(timeline[timeline.length - 1].time) + 120, 1);
     const endSeg   = timeline[activeIdx + 1];
     const endPct   = endSeg

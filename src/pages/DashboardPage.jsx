@@ -34,10 +34,19 @@ function parseMarkdownToBullets(text) {
 /** Parse comma-separated or newline-separated list to array */
 function parseList(str) {
     if (!str) return [];
-    return str
-        .split(/,|\n/)
-        .map(s => s.replace(/^[\s*\-•]+/, "").trim())
-        .filter(Boolean);
+    // Try JSON array parse first (new format)
+    if (str.trim().startsWith("[")) {
+        try {
+            const parsed = JSON.parse(str);
+            if (Array.isArray(parsed)) {
+                return parsed.map(s => String(s).trim()).filter(Boolean);
+            }
+        } catch {
+            // fall through to legacy split
+        }
+    }
+    // Legacy format: comma or newline separated string (old records)
+    return str.split(/,|\n/).map(s => s.replace(/^[\s*\-•]+/, "").trim()).filter(Boolean);
 }
 
 const SENT_CONFIG = {
@@ -1153,7 +1162,8 @@ export default function DashboardPage() {
             <footer className="border-t border-white/6 mt-12 py-5">
                 <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-2">
                     <span className="text-xs text-slate-600">© 2026 Convexa AI · Conversation Intelligence Platform</span>
-                    <span className="text-xs text-slate-700">Powered by Whisper · Ollama · Qwen 2.5</span>
+                    {/* CHANGED: updated from "Ollama · Qwen 2.5" to reflect the current AI stack */}
+                    <span className="text-xs text-slate-700">Powered by Whisper · Groq · Llama 3.3</span>
                 </div>
             </footer>
 

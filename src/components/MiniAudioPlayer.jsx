@@ -3,33 +3,33 @@
  *
  * ── CLOUDINARY MIGRATION ─────────────────────────────────────────────────────
  * `cloudinaryUrl` is a complete, already-encoded HTTPS URL returned directly
- * by Cloudinary. It must be used AS-IS — no BASE_URL prefix (that was only
- * needed for the old `/audio/{fileName}` local-disk endpoint, which no
- * longer exists) and no encodeURIComponent() (Cloudinary URLs are already
- * fully encoded; re-encoding double-encodes the %xx sequences and breaks
- * the URL). Prop renamed from `filePath` to `cloudinaryUrl` to make this
- * contract explicit at every call site.
+ * by Cloudinary. It must be used AS-IS — no BASE_URL prefix and no
+ * encodeURIComponent().
  * ─────────────────────────────────────────────────────────────────────────────
  *
- * Root causes fixed (Bug #2):
+ * Bugs fixed in this revision:
  *
- * 1. RANDOM PLAYBACK FAILURE — audio.play() is a Promise. If the browser
- *    hasn't loaded any audio data yet (preload="none"), the promise can
- *    reject silently. The old code called audio.play().catch(() => {}) which
- *    swallowed the error and left isPlaying=true showing the wrong UI state.
- *    Fix: catch the rejection, reset state, show error.
+ * 1. ERR_CACHE_OPERATION_NOT_SUPPORTED — calling audio.load() on a
+ *    preload="none" element forces an immediate cache lookup. Cloudinary
+ *    streams use 206 Partial Content responses; Chrome's cache layer cannot
+ *    serve a fresh load() from a cached partial range and fires an error
+ *    event, which set loadState="error" before the user ever clicked play.
+ *    Fix: removed audio.load() — just set audio.src. The browser fetches
+ *    only when play() is called, which is the correct behaviour for
+ *    preload="none".
  *
- * 2. STALE SRC — when the URL changes (e.g. navigating between calls in
- *    history without unmounting), the <audio> element keeps the old src.
- *    The browser may refuse to play or play the wrong file.
- *    Fix: useEffect on cloudinaryUrl — reset error/loaded state and reload.
+ * 2. Listener churn from unstable onStop reference — onStop was in the
+ *    event-listener effect's dependency array. Since both parent pages pass
+ *    an inline arrow function, every parent re-render caused all listeners
+ *    to be removed and re-added, creating a gap where an error event could
+ *    fire against a stale handler. Fix: onStop is stored in a ref; the
+ *    event-listener effect has no external dependencies and runs once.
  *
- * 3. EFFECT CLEANUP — the old code added no cleanup for the "ended" event
- *    listener on the audio element, causing double-fires after re-render.
- *    Fix: return cleanup function from useEffect.
- *
- * 4. MISSING LOADING STATE — users clicked play with no feedback; the
- *    browser was buffering silently. Added a loading indicator.
+ * 3. Error state set before play attempt — the error event listener fired
+ *    unconditionally from the load() call, permanently poisoning loadState
+ *    for that session. Removing load() (fix 1) eliminates this entirely.
+ *    An isAttemptingPlay ref also guards the handler so background errors
+ *    never reach the UI.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -40,25 +40,54 @@ export default function MiniAudioPlayer({ cloudinaryUrl, playingId, callId, onPl
 
     const [loadState, setLoadState] = useState("idle"); // idle | loading | ready | error
 
-    // ── Sync src and reset when cloudinaryUrl changes ───────────────────────
+    // ── Stable ref for onStop — avoids unstable dependency in effects ────────
+    // onStop is an inline arrow in both parent pages, so its reference changes
+    // on every parent render. Storing it in a ref means the event-listener
+    // effect never needs to re-run due to this prop changing.
+    const onStopRef = useRef(onStop);
+    useEffect(() => { onStopRef.current = onStop; }, [onStop]);
+
+    // ── Track whether a play() attempt is in flight ──────────────────────────
+    // Prevents background / stale error events from poisoning loadState.
+    const isAttemptingPlay = useRef(false);
+
+    // ── Sync src when cloudinaryUrl changes — DO NOT call audio.load() ───────
+    // Setting .src is sufficient. audio.load() on a preload="none" element
+    // triggers an immediate cache/network fetch. Cloudinary uses 206 Partial
+    // Content; Chrome cannot serve a fresh load() from a cached partial range
+    // and fires net::ERR_CACHE_OPERATION_NOT_SUPPORTED, which the error
+    // listener was incorrectly treating as a fatal playback failure.
+    // The browser will fetch the resource correctly when play() is called.
     useEffect(() => {
         setLoadState("idle");
+        isAttemptingPlay.current = false;
         const audio = audioRef.current;
         if (!audio || !cloudinaryUrl) return;
-        // Cloudinary URLs are already complete and fully encoded — use directly
         audio.src = cloudinaryUrl;
-        audio.load();
+        // No audio.load() here — intentional.
     }, [cloudinaryUrl]);
 
-    // ── Audio element event listeners ──────────────────────────────────────
+    // ── Audio element event listeners — stable, run once ────────────────────
+    // No external dependencies: onStop is accessed via onStopRef.current.
+    // This effect never re-runs mid-playback, eliminating the listener-churn
+    // race condition.
     useEffect(() => {
         const audio = audioRef.current;
         if (!audio) return;
 
         const onCanPlay = () => setLoadState("ready");
-        const onError   = () => { setLoadState("error"); onStop?.(); };
-        const onEnded   = () => { setLoadState("ready"); onStop?.(); };
-        const onWaiting = () => setLoadState("loading");
+
+        const onError = () => {
+            // Only surface errors that happen during an actual play attempt.
+            // Stale cache errors from src assignment or background probing
+            // are ignored — they do not reflect a user-visible failure.
+            if (!isAttemptingPlay.current) return;
+            setLoadState("error");
+            onStopRef.current?.();
+        };
+
+        const onEnded   = () => { setLoadState("ready"); onStopRef.current?.(); };
+        const onWaiting = () => { if (isAttemptingPlay.current) setLoadState("loading"); };
         const onPlaying = () => setLoadState("ready");
 
         audio.addEventListener("canplay",  onCanPlay);
@@ -74,16 +103,17 @@ export default function MiniAudioPlayer({ cloudinaryUrl, playingId, callId, onPl
             audio.removeEventListener("waiting",  onWaiting);
             audio.removeEventListener("playing",  onPlaying);
         };
-    }, [onStop]);
+    }, []); // intentionally empty — stable via refs
 
-    // ── When another call takes over, pause this one ───────────────────────
+    // ── When another call takes over, pause this one ─────────────────────────
     useEffect(() => {
         if (!isPlaying && audioRef.current) {
             audioRef.current.pause();
+            isAttemptingPlay.current = false;
         }
     }, [isPlaying]);
 
-    // ── Toggle play / pause ────────────────────────────────────────────────
+    // ── Toggle play / pause ──────────────────────────────────────────────────
     const toggle = async (e) => {
         e.stopPropagation();
         const audio = audioRef.current;
@@ -91,14 +121,17 @@ export default function MiniAudioPlayer({ cloudinaryUrl, playingId, callId, onPl
 
         if (isPlaying) {
             audio.pause();
+            isAttemptingPlay.current = false;
             onStop?.();
         } else {
             setLoadState("loading");
+            isAttemptingPlay.current = true;
             onPlay?.(callId);
             try {
                 await audio.play();
                 setLoadState("ready");
             } catch (err) {
+                isAttemptingPlay.current = false;
                 if (err.name !== "AbortError") {
                     setLoadState("error");
                     onStop?.();
@@ -162,13 +195,11 @@ export default function MiniAudioPlayer({ cloudinaryUrl, playingId, callId, onPl
                         animation:"miniSpin .7s linear infinite",
                     }} />
                 ) : isPlaying ? (
-                    /* SVG pause icon — more precise than emoji */
                     <svg width="9" height="11" viewBox="0 0 9 11" fill="none">
                         <rect x="0.5" y="0.5" width="2.5" height="10" rx="1" fill="rgb(196,181,253)" />
                         <rect x="6" y="0.5" width="2.5" height="10" rx="1" fill="rgb(196,181,253)" />
                     </svg>
                 ) : (
-                    /* SVG play icon */
                     <svg width="9" height="11" viewBox="0 0 9 11" fill="none" style={{ marginLeft:1 }}>
                         <polygon points="0,0.5 9,5.5 0,10.5" fill="#94a3b8" />
                     </svg>
