@@ -191,6 +191,103 @@ const globalStyles = `
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: #05050a; }
   ::-webkit-scrollbar-thumb { background: rgba(139,92,246,0.4); border-radius: 3px; }
+
+  /* ── Responsive utilities ── */
+  .hidden-mobile { display: flex; }
+
+  @media (max-width: 767px) {
+    .hidden-mobile { display: none !important; }
+
+    /* Hero: stack columns */
+    .hero-grid {
+      grid-template-columns: 1fr !important;
+    }
+    .hero-right {
+      display: none !important;
+    }
+    .hero-stats {
+      gap: 20px !important;
+      flex-wrap: wrap !important;
+    }
+
+    /* Analytics: stat row 2 cols, inner grid stack */
+    .analytics-stat-row {
+      grid-template-columns: repeat(2, 1fr) !important;
+    }
+    .analytics-inner-grid {
+      grid-template-columns: 1fr !important;
+    }
+
+    /* WhyConvexa: stack */
+    .why-grid {
+      grid-template-columns: 1fr !important;
+      gap: 40px !important;
+    }
+
+    /* Pricing: stack */
+    .pricing-grid {
+      grid-template-columns: 1fr !important;
+    }
+
+    /* Footer: stack */
+    .footer-grid {
+      grid-template-columns: 1fr !important;
+      gap: 32px !important;
+    }
+    .footer-bottom {
+      flex-direction: column !important;
+      gap: 8px !important;
+      text-align: center !important;
+    }
+
+    /* CTA inner padding */
+    .cta-inner {
+      padding: 48px 24px !important;
+      border-radius: 20px !important;
+    }
+
+    /* Navbar CTA buttons: hide "Log in" on very small screens to save space */
+    .nav-login-btn {
+      display: none !important;
+    }
+  }
+
+  @media (min-width: 768px) and (max-width: 1023px) {
+    /* Hero: stack on tablet too */
+    .hero-grid {
+      grid-template-columns: 1fr !important;
+    }
+    .hero-right {
+      display: none !important;
+    }
+
+    /* Analytics: stat row 2×2 */
+    .analytics-stat-row {
+      grid-template-columns: repeat(2, 1fr) !important;
+    }
+    .analytics-inner-grid {
+      grid-template-columns: 1fr !important;
+    }
+
+    /* WhyConvexa: stack */
+    .why-grid {
+      grid-template-columns: 1fr !important;
+      gap: 48px !important;
+    }
+
+    /* Pricing: stack to 1 col on tablet */
+    .pricing-grid {
+      grid-template-columns: 1fr !important;
+      max-width: 480px !important;
+      margin: 0 auto !important;
+    }
+
+    /* Footer: 2 cols */
+    .footer-grid {
+      grid-template-columns: 1fr 1fr !important;
+      gap: 32px !important;
+    }
+  }
 `;
 
 /* ─────────────────────────────────────────
@@ -311,7 +408,7 @@ function Navbar() {
 
                     {/* CTA */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <Link to="/login" style={{
+                        <Link to="/login" className="nav-login-btn" style={{
                             padding: '8px 18px', borderRadius: 8, fontSize: 14, fontWeight: 500,
                             color: 'rgba(226,232,240,0.8)', textDecoration: 'none',
                             border: '1px solid rgba(255,255,255,0.1)',
@@ -364,7 +461,7 @@ function Hero() {
             }} />
 
             <div style={{ maxWidth: 1280, margin: '0 auto', padding: '80px 24px', position: 'relative', zIndex: 1, width: '100%' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 64, alignItems: 'center' }}>
+                <div className="hero-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 64, alignItems: 'center' }}>
 
                     {/* LEFT */}
                     <div style={{ animation: 'fadeUp 0.8s ease both' }}>
@@ -424,7 +521,7 @@ function Hero() {
                         </div>
 
                         {/* Social proof numbers */}
-                        <div style={{ display: 'flex', gap: 32, marginTop: 48 }}>
+                        <div className="hero-stats" style={{ display: 'flex', gap: 32, marginTop: 48 }}>
                             {[
                                 { num: '95%', label: 'Transcript Accuracy' },
                                 { num: '2min', label: 'Avg. Analysis Time' },
@@ -439,7 +536,7 @@ function Hero() {
                     </div>
 
                     {/* RIGHT — DASHBOARD PREVIEW */}
-                    <div style={{ position: 'relative', animation: 'scaleIn 1s ease both', animationDelay: '0.2s' }}>
+                    <div className="hero-right" style={{ position: 'relative', animation: 'scaleIn 1s ease both', animationDelay: '0.2s' }}>
 
                         {/* Glow behind card */}
                         <div style={{
@@ -827,7 +924,7 @@ function AnalyticsShowcase() {
                     <div style={{ padding: 32 }}>
 
                         {/* Stat row */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 16, marginBottom: 28 }}>
+                        <div className="analytics-stat-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 16, marginBottom: 28 }}>
                             {[
                                 { label: 'Total Calls', val: '2,847', color: '#7c3aed', delta: '+12%' },
                                 { label: 'Avg QA Score', val: '87.4', color: '#4f46e5', delta: '+5.2' },
@@ -845,7 +942,7 @@ function AnalyticsShowcase() {
                             ))}
                         </div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20 }}>
+                        <div className="analytics-inner-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20 }}>
 
                             {/* Keyword bars */}
                             <div style={{ padding: '24px', borderRadius: 20, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
@@ -927,7 +1024,7 @@ function WhyConvexa() {
         <section style={{ padding: '120px 24px', position: 'relative', zIndex: 1 }} className="section-reveal">
             <div style={{ maxWidth: 1280, margin: '0 auto' }}>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 80, alignItems: 'center' }}>
+                <div className="why-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 80, alignItems: 'center' }}>
 
                     <div>
                         <div style={{
@@ -1070,7 +1167,7 @@ function Pricing() {
                     <p style={{ fontSize: 17, color: 'rgba(226,232,240,0.5)', marginTop: 16 }}>Start free. Scale when you're ready.</p>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 24 }}>
+                <div className="pricing-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 24 }}>
                     {plans.map((p, i) => (
                         <div key={i} className={p.highlight ? 'animate-pulse-glow' : ''} style={{
                             padding: '36px 28px', borderRadius: 24,
@@ -1134,7 +1231,7 @@ function CTA() {
     return (
         <section style={{ padding: '80px 24px 120px', position: 'relative', zIndex: 1 }} className="section-reveal">
             <div style={{ maxWidth: 900, margin: '0 auto' }}>
-                <div style={{
+                <div className="cta-inner" style={{
                     borderRadius: 32, padding: '80px 60px', textAlign: 'center',
                     background: 'linear-gradient(135deg, rgba(124,58,237,0.3) 0%, rgba(79,70,229,0.2) 50%, rgba(14,165,233,0.2) 100%)',
                     border: '1px solid rgba(124,58,237,0.3)',
@@ -1198,7 +1295,7 @@ function Footer() {
     return (
         <footer style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '48px 24px 32px', position: 'relative', zIndex: 1 }}>
             <div style={{ maxWidth: 1280, margin: '0 auto' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 40, marginBottom: 48 }}>
+                <div className="footer-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 40, marginBottom: 48 }}>
 
                     {/* Brand */}
                     <div>
@@ -1250,7 +1347,7 @@ function Footer() {
                     ))}
                 </div>
 
-                <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="footer-bottom" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <p style={{ fontSize: 13, color: 'rgba(226,232,240,0.3)' }}>© 2026 Convexa AI. All rights reserved.</p>
                     <p style={{ fontSize: 13, color: 'rgba(226,232,240,0.3)' }}>Made for the world's best support teams.</p>
                 </div>
