@@ -61,6 +61,7 @@ export default function AnalyticsPage() {
     const [loading, setLoading]   = useState(true);
     const [error, setError]       = useState(null);
     const [profileOpen, setProfileOpen] = useState(false);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     const fetchCalls = useCallback(async () => {
         setLoading(true);
@@ -82,6 +83,20 @@ export default function AnalyticsPage() {
         if (profileOpen) window.addEventListener("click", h);
         return () => window.removeEventListener("click", h);
     }, [profileOpen]);
+
+    useEffect(() => {
+        const onKey = (e) => { if (e.key === "Escape") setMobileMenuOpen(false); };
+        if (mobileMenuOpen) {
+            document.addEventListener("keydown", onKey);
+            document.body.style.overflow = "hidden";
+        } else {
+            document.body.style.overflow = "";
+        }
+        return () => {
+            document.removeEventListener("keydown", onKey);
+            document.body.style.overflow = "";
+        };
+    }, [mobileMenuOpen]);
 
     const handleLogout = () => { logoutAndRedirect(); };
 
@@ -182,31 +197,117 @@ export default function AnalyticsPage() {
                         ))}
                     </nav>
 
-                    <div className="relative" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => setProfileOpen(o => !o)}
-                            className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">
-                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center text-xs font-bold">
-                                {user?.name?.[0]?.toUpperCase() ?? "U"}
-                            </div>
-                            <span className="text-sm font-medium hidden sm:block">{user?.name ?? "User"}</span>
+                    <div className="flex items-center gap-3">
+                        <div className="relative" onClick={e => e.stopPropagation()}>
+                            <button onClick={() => setProfileOpen(o => !o)}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">
+                                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center text-xs font-bold">
+                                    {user?.name?.[0]?.toUpperCase() ?? "U"}
+                                </div>
+                                <span className="text-sm font-medium hidden sm:block">{user?.name ?? "User"}</span>
+                                <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${profileOpen ? "rotate-180" : ""}`}
+                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </button>
+                            {profileOpen && (
+                                <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl border border-white/10 bg-slate-900/98 backdrop-blur-xl shadow-2xl overflow-hidden z-50">
+                                    <div className="px-4 py-3 border-b border-white/8">
+                                        <p className="text-sm font-bold text-white">{user?.name}</p>
+                                        <p className="text-xs text-slate-400 truncate">{user?.email}</p>
+                                    </div>
+                                    <div className="p-2">
+                                        <button onClick={handleLogout}
+                                            className="w-full text-left px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-all">
+                                            Sign out
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Hamburger — mobile only, rightmost item */}
+                        <button
+                            className="md:hidden flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all"
+                            onClick={() => setMobileMenuOpen(o => !o)}
+                            aria-label="Toggle navigation menu">
+                            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                {mobileMenuOpen
+                                    ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />}
+                            </svg>
                         </button>
-                        {profileOpen && (
-                            <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl border border-white/10 bg-slate-900/98 backdrop-blur-xl shadow-2xl overflow-hidden z-50">
-                                <div className="px-4 py-3 border-b border-white/8">
-                                    <p className="text-sm font-bold text-white">{user?.name}</p>
-                                    <p className="text-xs text-slate-400 truncate">{user?.email}</p>
-                                </div>
-                                <div className="p-2">
-                                    <button onClick={handleLogout}
-                                        className="w-full text-left px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-all">
-                                        Sign out
-                                    </button>
-                                </div>
-                            </div>
-                        )}
                     </div>
                 </div>
             </header>
+
+            {/* ── MOBILE NAV DRAWER (fixed overlay, slides from right) ── */}
+            {mobileMenuOpen && (
+                <>
+                    <div
+                        className="md:hidden fixed inset-0 z-50"
+                        style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+                        onClick={() => setMobileMenuOpen(false)}
+                        aria-hidden="true"
+                    />
+                    <div
+                        className="md:hidden fixed top-0 right-0 h-full w-72 z-50 flex flex-col"
+                        style={{
+                            background: "linear-gradient(160deg, rgba(13,11,42,0.99) 0%, rgba(10,22,40,0.99) 100%)",
+                            borderLeft: "1px solid rgba(255,255,255,0.08)",
+                            backdropFilter: "blur(24px)",
+                            animation: "drawerSlideIn 0.25s cubic-bezier(0.32, 0.72, 0, 1)",
+                        }}>
+                        <div className="flex items-center justify-between px-5 h-16 border-b border-white/8 flex-shrink-0">
+                            <span className="text-sm font-bold text-white/60 uppercase tracking-widest">Navigation</span>
+                            <button
+                                onClick={() => setMobileMenuOpen(false)}
+                                className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all"
+                                aria-label="Close menu">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <nav className="flex flex-col gap-1 p-4 flex-1">
+                            {[
+                                { label: "Dashboard",    path: "/dashboard",  icon: "📊", desc: "Overview & recent calls" },
+                                { label: "Call History", path: "/history",    icon: "📋", desc: "Browse all recordings"   },
+                                { label: "Analytics",    path: "/analytics",  icon: "📈", desc: "Trends & insights"       },
+                            ].map(({ label, path, icon, desc }) => (
+                                <Link
+                                    key={label}
+                                    to={path}
+                                    onClick={() => setMobileMenuOpen(false)}
+                                    className={`flex items-center gap-3.5 px-4 py-3.5 rounded-xl text-sm font-semibold transition-all group
+                                        ${window.location.pathname === path
+                                            ? "bg-white/10 text-white border border-white/10"
+                                            : "text-slate-400 hover:text-white hover:bg-white/6 border border-transparent hover:border-white/8"}`}>
+                                    <span className="text-xl w-7 text-center flex-shrink-0">{icon}</span>
+                                    <div className="flex flex-col min-w-0">
+                                        <span className="truncate">{label}</span>
+                                        <span className="text-xs font-normal text-slate-600 group-hover:text-slate-500 transition-colors">{desc}</span>
+                                    </div>
+                                    {window.location.pathname === path && (
+                                        <span className="ml-auto w-1.5 h-1.5 rounded-full bg-violet-400 flex-shrink-0" />
+                                    )}
+                                </Link>
+                            ))}
+                        </nav>
+                        <div className="px-5 py-4 border-t border-white/8 flex-shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                    {user?.name?.[0]?.toUpperCase() ?? "U"}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-bold text-white truncate">{user?.name}</p>
+                                    <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </>
+            )}
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
 
@@ -308,7 +409,7 @@ export default function AnalyticsPage() {
                                 <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-5">Avg QA Dimensions</p>
                                 {loading ? <Skeleton className="h-56" /> : (
                                     <div className="space-y-4">
-                                        <div className="flex justify-around">
+                                        <div className="grid grid-cols-2 sm:flex sm:justify-around gap-4">
                                             {qaDims.map(d => (
                                                 <div key={d.key} className="flex flex-col items-center gap-1.5">
                                                     <ScoreRing score={d.value} size={64} stroke={5} color={d.color} />
@@ -397,9 +498,9 @@ export default function AnalyticsPage() {
                             <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
                                 <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-5">Score Distribution</p>
                                 <ResponsiveContainer width="100%" height={200}>
-                                    <BarChart data={scoreHist} barSize={32}>
+                                    <BarChart data={scoreHist} barSize={18}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                                        <XAxis dataKey="range" tick={{ fill: "#64748b", fontSize: 10 }} axisLine={false} tickLine={false} />
+                                        <XAxis dataKey="range" tick={{ fill: "#64748b", fontSize: 9 }} axisLine={false} tickLine={false} interval={0} />
                                         <YAxis allowDecimals={false} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} />
                                         <Tooltip contentStyle={tooltipStyle} />
                                         <Bar dataKey="count" radius={[4, 4, 0, 0]}>
@@ -440,7 +541,7 @@ export default function AnalyticsPage() {
                                 <div className="space-y-2.5">
                                     {topKw.slice(0, 10).map(([kw, cnt]) => (
                                         <div key={kw} className="flex items-center gap-3">
-                                            <span className="w-32 text-xs text-slate-300 font-medium truncate text-right">{kw}</span>
+                                            <span className="w-20 sm:w-32 text-xs text-slate-300 font-medium truncate text-right">{kw}</span>
                                             <div className="flex-1 h-1.5 rounded-full overflow-hidden bg-white/8">
                                                 <div className="h-1.5 rounded-full bg-gradient-to-r from-violet-500 to-blue-500 transition-all duration-700"
                                                     style={{ width: `${(cnt / topKw[0][1]) * 100}%` }} />
@@ -461,6 +562,13 @@ export default function AnalyticsPage() {
                     <span className="text-xs text-slate-700">Powered by Whisper · Ollama · Qwen 2.5</span>
                 </div>
             </footer>
+
+            <style>{`
+                @keyframes drawerSlideIn {
+                    from { transform: translateX(100%); }
+                    to   { transform: translateX(0); }
+                }
+            `}</style>
         </div>
     );
 }

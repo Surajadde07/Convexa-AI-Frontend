@@ -35,7 +35,7 @@ function DeleteModal({ callName, onConfirm, onCancel }) {
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
             style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}>
-            <div className="w-full max-w-sm rounded-3xl border border-white/15 p-8"
+            <div className="w-full max-w-sm rounded-3xl border border-white/15 p-5 sm:p-8"
                 style={{ background: "linear-gradient(135deg, rgba(13,11,42,0.98) 0%, rgba(10,22,40,0.98) 100%)" }}>
                 <div className="flex flex-col items-center text-center gap-4">
                     <div className="w-16 h-16 rounded-full bg-red-500/15 flex items-center justify-center text-3xl border border-red-500/20">
@@ -78,7 +78,7 @@ function Toast({ message, type = "success", onDismiss }) {
         ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
         : "bg-red-500/20 border-red-500/40 text-red-300";
     return (
-        <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-5 py-3.5 rounded-2xl border backdrop-blur-xl shadow-2xl ${colors}`}
+        <div className={`fixed bottom-6 right-6 left-6 sm:left-auto z-[100] flex items-center gap-3 px-4 sm:px-5 py-3.5 rounded-2xl border backdrop-blur-xl shadow-2xl ${colors}`}
             style={{ animation: "slideUp 0.3s ease" }}>
             <span className="text-xl">{type === "success" ? "✅" : "⚠️"}</span>
             <span className="text-sm font-semibold">{message}</span>
@@ -102,6 +102,7 @@ export default function HistoryPage() {
     const [deleteTarget, setDeleteTarget]     = useState(null); // call object to delete
     const [toast, setToast]                   = useState(null);
     const [playingId, setPlayingId]           = useState(null);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     // Filters
     const [search, setSearch]                 = useState("");
@@ -131,6 +132,20 @@ export default function HistoryPage() {
         if (profileOpen) window.addEventListener("click", h);
         return () => window.removeEventListener("click", h);
     }, [profileOpen]);
+
+    useEffect(() => {
+        const onKey = (e) => { if (e.key === "Escape") setMobileMenuOpen(false); };
+        if (mobileMenuOpen) {
+            document.addEventListener("keydown", onKey);
+            document.body.style.overflow = "hidden";
+        } else {
+            document.body.style.overflow = "";
+        }
+        return () => {
+            document.removeEventListener("keydown", onKey);
+            document.body.style.overflow = "";
+        };
+    }, [mobileMenuOpen]);
 
     const handleLogout = () => {
         logoutAndRedirect();
@@ -213,39 +228,121 @@ export default function HistoryPage() {
                         ))}
                     </nav>
 
-                    <div className="relative" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => setProfileOpen(o => !o)}
-                            className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10
-                                bg-white/5 hover:bg-white/10 transition-all">
-                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-blue-500
-                                flex items-center justify-center text-xs font-bold">
-                                {user?.name?.[0]?.toUpperCase() ?? "U"}
-                            </div>
-                            <span className="text-sm font-medium hidden sm:block">{user?.name ?? "User"}</span>
-                            <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${profileOpen ? "rotate-180" : ""}`}
-                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    <div className="flex items-center gap-3">
+                        <div className="relative" onClick={e => e.stopPropagation()}>
+                            <button onClick={() => setProfileOpen(o => !o)}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10
+                                    bg-white/5 hover:bg-white/10 transition-all">
+                                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-blue-500
+                                    flex items-center justify-center text-xs font-bold">
+                                    {user?.name?.[0]?.toUpperCase() ?? "U"}
+                                </div>
+                                <span className="text-sm font-medium hidden sm:block">{user?.name ?? "User"}</span>
+                                <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${profileOpen ? "rotate-180" : ""}`}
+                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </button>
+                            {profileOpen && (
+                                <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl border border-white/10
+                                    bg-slate-900/98 backdrop-blur-xl shadow-2xl overflow-hidden z-50">
+                                    <div className="px-4 py-3 border-b border-white/8">
+                                        <p className="text-sm font-bold text-white">{user?.name}</p>
+                                        <p className="text-xs text-slate-400 truncate">{user?.email}</p>
+                                    </div>
+                                    <div className="p-2">
+                                        <button onClick={handleLogout}
+                                            className="w-full text-left px-3 py-2 text-sm text-red-400
+                                                hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-all">
+                                            Sign out
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Hamburger — mobile only, rightmost item */}
+                        <button
+                            className="md:hidden flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all"
+                            onClick={e => { e.stopPropagation(); setMobileMenuOpen(o => !o); }}
+                            aria-label="Toggle navigation menu">
+                            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                {mobileMenuOpen
+                                    ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />}
                             </svg>
                         </button>
-                        {profileOpen && (
-                            <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl border border-white/10
-                                bg-slate-900/98 backdrop-blur-xl shadow-2xl overflow-hidden z-50">
-                                <div className="px-4 py-3 border-b border-white/8">
-                                    <p className="text-sm font-bold text-white">{user?.name}</p>
-                                    <p className="text-xs text-slate-400 truncate">{user?.email}</p>
-                                </div>
-                                <div className="p-2">
-                                    <button onClick={handleLogout}
-                                        className="w-full text-left px-3 py-2 text-sm text-red-400
-                                            hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-all">
-                                        Sign out
-                                    </button>
-                                </div>
-                            </div>
-                        )}
                     </div>
                 </div>
             </header>
+
+            {/* ── MOBILE NAV DRAWER (fixed overlay, slides from right) ── */}
+            {mobileMenuOpen && (
+                <>
+                    <div
+                        className="md:hidden fixed inset-0 z-50"
+                        style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+                        onClick={() => setMobileMenuOpen(false)}
+                        aria-hidden="true"
+                    />
+                    <div
+                        className="md:hidden fixed top-0 right-0 h-full w-72 z-50 flex flex-col"
+                        style={{
+                            background: "linear-gradient(160deg, rgba(13,11,42,0.99) 0%, rgba(10,22,40,0.99) 100%)",
+                            borderLeft: "1px solid rgba(255,255,255,0.08)",
+                            backdropFilter: "blur(24px)",
+                            animation: "drawerSlideIn 0.25s cubic-bezier(0.32, 0.72, 0, 1)",
+                        }}>
+                        <div className="flex items-center justify-between px-5 h-16 border-b border-white/8 flex-shrink-0">
+                            <span className="text-sm font-bold text-white/60 uppercase tracking-widest">Navigation</span>
+                            <button
+                                onClick={() => setMobileMenuOpen(false)}
+                                className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all"
+                                aria-label="Close menu">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <nav className="flex flex-col gap-1 p-4 flex-1">
+                            {[
+                                { label: "Dashboard",    path: "/dashboard",  icon: "📊", desc: "Overview & recent calls" },
+                                { label: "Call History", path: "/history",    icon: "📋", desc: "Browse all recordings"   },
+                                { label: "Analytics",    path: "/analytics",  icon: "📈", desc: "Trends & insights"       },
+                            ].map(({ label, path, icon, desc }) => (
+                                <Link
+                                    key={label}
+                                    to={path}
+                                    onClick={() => setMobileMenuOpen(false)}
+                                    className={`flex items-center gap-3.5 px-4 py-3.5 rounded-xl text-sm font-semibold transition-all group
+                                        ${window.location.pathname === path
+                                            ? "bg-white/10 text-white border border-white/10"
+                                            : "text-slate-400 hover:text-white hover:bg-white/6 border border-transparent hover:border-white/8"}`}>
+                                    <span className="text-xl w-7 text-center flex-shrink-0">{icon}</span>
+                                    <div className="flex flex-col min-w-0">
+                                        <span className="truncate">{label}</span>
+                                        <span className="text-xs font-normal text-slate-600 group-hover:text-slate-500 transition-colors">{desc}</span>
+                                    </div>
+                                    {window.location.pathname === path && (
+                                        <span className="ml-auto w-1.5 h-1.5 rounded-full bg-violet-400 flex-shrink-0" />
+                                    )}
+                                </Link>
+                            ))}
+                        </nav>
+                        <div className="px-5 py-4 border-t border-white/8 flex-shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                    {user?.name?.[0]?.toUpperCase() ?? "U"}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-bold text-white truncate">{user?.name}</p>
+                                    <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </>
+            )}
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 
@@ -316,13 +413,13 @@ export default function HistoryPage() {
                         {/* Date from */}
                         <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)}
                             title="From date"
-                            className="bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-slate-300
+                            className="w-full sm:w-auto bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-slate-300
                                 focus:outline-none focus:border-violet-500/40 transition-all" />
 
                         {/* Date to */}
                         <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)}
                             title="To date"
-                            className="bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-slate-300
+                            className="w-full sm:w-auto bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-slate-300
                                 focus:outline-none focus:border-violet-500/40 transition-all" />
 
                         {/* Sort */}
@@ -360,8 +457,8 @@ export default function HistoryPage() {
                     </div>
                 ) : (
                     <div className="rounded-2xl border border-white/10 overflow-hidden">
-                        {/* Table header */}
-                        <div className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-4 px-5 py-3 border-b border-white/8"
+                        {/* Table header — desktop only */}
+                        <div className="hidden md:grid md:grid-cols-[2fr_1fr_1fr_1fr_auto] gap-4 px-5 py-3 border-b border-white/8"
                             style={{ background: "rgba(255,255,255,0.03)" }}>
                             {["File Name", "Date", "Sentiment", "Score", "Actions"].map(h => (
                                 <p key={h} className="text-xs font-bold text-slate-500 uppercase tracking-wider">{h}</p>
@@ -374,11 +471,10 @@ export default function HistoryPage() {
                                 const cfg = SENT_CONFIG[call.sentiment] || SENT_CONFIG.NEUTRAL;
                                 return (
                                     <div key={call.id}
-                                        className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-4 px-5 py-4 items-center
-                                            hover:bg-white/3 transition-all group">
+                                        className="hover:bg-white/3 transition-all group px-4 sm:px-5 py-4">
 
-                                        {/* File name + mini player */}
-                                        <div className="flex items-center gap-3 min-w-0">
+                                        {/* ── MOBILE card layout (below md) ── */}
+                                        <div className="flex items-start gap-3 md:hidden">
                                             <MiniAudioPlayer
                                                 cloudinaryUrl={call.cloudinaryUrl}
                                                 playingId={playingId}
@@ -386,48 +482,94 @@ export default function HistoryPage() {
                                                 onPlay={setPlayingId}
                                                 onStop={() => setPlayingId(null)}
                                             />
-                                            <div className="min-w-0">
+                                            <div className="flex-1 min-w-0">
                                                 <p className="text-sm font-semibold text-white truncate">{call.fileName}</p>
-                                                <p className="text-xs text-slate-500 truncate">{call.status || "COMPLETED"}</p>
+                                                <p className="text-xs text-slate-500 truncate mb-2">{call.status || "COMPLETED"}</p>
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="text-xs text-slate-400">
+                                                        {call.createdAt
+                                                            ? new Date(call.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                                                            : "—"}
+                                                    </span>
+                                                    {call.sentiment && (
+                                                        <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                                                            style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
+                                                            {cfg.emoji} {cfg.label}
+                                                        </span>
+                                                    )}
+                                                    <ScoreBadge score={call.overallScore} />
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-col gap-1.5 flex-shrink-0">
+                                                <Link to={`/calls/${call.id}`}
+                                                    className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all
+                                                        bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 hover:text-violet-300
+                                                        border border-violet-500/20 hover:border-violet-500/40">
+                                                    View
+                                                </Link>
+                                                <button onClick={() => setDeleteTarget(call)}
+                                                    className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all
+                                                        bg-red-500/8 hover:bg-red-500/15 text-red-500 hover:text-red-400
+                                                        border border-red-500/15 hover:border-red-500/30">
+                                                    Del
+                                                </button>
                                             </div>
                                         </div>
 
-                                        {/* Date */}
-                                        <p className="text-xs text-slate-400">
-                                            {call.createdAt
-                                                ? new Date(call.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-                                                : "—"}
-                                        </p>
+                                        {/* ── DESKTOP grid layout (md+) ── */}
+                                        <div className="hidden md:grid md:grid-cols-[2fr_1fr_1fr_1fr_auto] gap-4 items-center">
+                                            {/* File name + mini player */}
+                                            <div className="flex items-center gap-3 min-w-0">
+                                                <MiniAudioPlayer
+                                                    cloudinaryUrl={call.cloudinaryUrl}
+                                                    playingId={playingId}
+                                                    callId={call.id}
+                                                    onPlay={setPlayingId}
+                                                    onStop={() => setPlayingId(null)}
+                                                />
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-semibold text-white truncate">{call.fileName}</p>
+                                                    <p className="text-xs text-slate-500 truncate">{call.status || "COMPLETED"}</p>
+                                                </div>
+                                            </div>
 
-                                        {/* Sentiment */}
-                                        <div>
-                                            {call.sentiment ? (
-                                                <span className="text-xs font-bold px-2.5 py-1 rounded-full"
-                                                    style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
-                                                    {cfg.emoji} {cfg.label}
-                                                </span>
-                                            ) : (
-                                                <span className="text-slate-600 text-xs">—</span>
-                                            )}
-                                        </div>
+                                            {/* Date */}
+                                            <p className="text-xs text-slate-400">
+                                                {call.createdAt
+                                                    ? new Date(call.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                                                    : "—"}
+                                            </p>
 
-                                        {/* Score */}
-                                        <ScoreBadge score={call.overallScore} />
+                                            {/* Sentiment */}
+                                            <div>
+                                                {call.sentiment ? (
+                                                    <span className="text-xs font-bold px-2.5 py-1 rounded-full"
+                                                        style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
+                                                        {cfg.emoji} {cfg.label}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-slate-600 text-xs">—</span>
+                                                )}
+                                            </div>
 
-                                        {/* Actions */}
-                                        <div className="flex items-center gap-2">
-                                            <Link to={`/calls/${call.id}`}
-                                                className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all
-                                                    bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 hover:text-violet-300
-                                                    border border-violet-500/20 hover:border-violet-500/40">
-                                                View
-                                            </Link>
-                                            <button onClick={() => setDeleteTarget(call)}
-                                                className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all
-                                                    bg-red-500/8 hover:bg-red-500/15 text-red-500 hover:text-red-400
-                                                    border border-red-500/15 hover:border-red-500/30">
-                                                Delete
-                                            </button>
+                                            {/* Score */}
+                                            <ScoreBadge score={call.overallScore} />
+
+                                            {/* Actions */}
+                                            <div className="flex items-center gap-2">
+                                                <Link to={`/calls/${call.id}`}
+                                                    className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all
+                                                        bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 hover:text-violet-300
+                                                        border border-violet-500/20 hover:border-violet-500/40">
+                                                    View
+                                                </Link>
+                                                <button onClick={() => setDeleteTarget(call)}
+                                                    className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all
+                                                        bg-red-500/8 hover:bg-red-500/15 text-red-500 hover:text-red-400
+                                                        border border-red-500/15 hover:border-red-500/30">
+                                                    Delete
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 );
@@ -471,6 +613,10 @@ export default function HistoryPage() {
                 @keyframes slideUp {
                     from { transform: translateY(24px); opacity: 0; }
                     to   { transform: translateY(0); opacity: 1; }
+                }
+                @keyframes drawerSlideIn {
+                    from { transform: translateX(100%); }
+                    to   { transform: translateX(0); }
                 }
             `}</style>
         </div>

@@ -10,9 +10,6 @@ import { logoutAndRedirect } from "../components/ProtectedRoute";
 import logo from "../assets/CONVEXA_AI_logo.png";
 import MiniAudioPlayer from "../components/MiniAudioPlayer.jsx";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UTILITIES
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** Strip markdown symbols and return clean plain-text bullet array */
 function parseMarkdownToBullets(text) {
@@ -21,11 +18,11 @@ function parseMarkdownToBullets(text) {
         .split(/\n|(?<=\.)\s{2,}/)
         .map(line =>
             line
-                .replace(/^[\s*\-•>#]+/, "")   // leading *, -, •, >, #
-                .replace(/\*\*(.*?)\*\*/g, "$1") // **bold**
-                .replace(/\*(.*?)\*/g, "$1")     // *italic*
-                .replace(/`(.*?)`/g, "$1")       // `code`
-                .replace(/#+\s?/g, "")           // ### headings
+                .replace(/^[\s*\-•>#]+/, "")
+                .replace(/\*\*(.*?)\*\*/g, "$1")
+                .replace(/\*(.*?)\*/g, "$1")
+                .replace(/`(.*?)`/g, "$1")
+                .replace(/#+\s?/g, "")
                 .trim()
         )
         .filter(line => line.length > 3);
@@ -34,7 +31,6 @@ function parseMarkdownToBullets(text) {
 /** Parse comma-separated or newline-separated list to array */
 function parseList(str) {
     if (!str) return [];
-    // Try JSON array parse first (new format)
     if (str.trim().startsWith("[")) {
         try {
             const parsed = JSON.parse(str);
@@ -42,10 +38,8 @@ function parseList(str) {
                 return parsed.map(s => String(s).trim()).filter(Boolean);
             }
         } catch {
-            // fall through to legacy split
         }
     }
-    // Legacy format: comma or newline separated string (old records)
     return str.split(/,|\n/).map(s => s.replace(/^[\s*\-•]+/, "").trim()).filter(Boolean);
 }
 
@@ -55,9 +49,6 @@ const SENT_CONFIG = {
     NEUTRAL: { color: "#f59e0b", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.3)", label: "Neutral", emoji: "😐" },
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SUB-COMPONENTS
-// ─────────────────────────────────────────────────────────────────────────────
 
 function Skeleton({ className = "" }) {
     return <div className={`animate-pulse rounded-xl bg-white/5 ${className}`} />;
@@ -114,7 +105,7 @@ function Toast({ message, type = "success", onDismiss }) {
         ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
         : "bg-red-500/20 border-red-500/40 text-red-300";
     return (
-        <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-5 py-3.5 rounded-2xl border backdrop-blur-xl shadow-2xl ${colors}`}
+        <div className={`fixed bottom-6 right-6 left-6 sm:left-auto z-[100] flex items-center gap-3 px-4 sm:px-5 py-3.5 rounded-2xl border backdrop-blur-xl shadow-2xl ${colors}`}
             style={{ animation: "slideUp 0.3s ease" }}>
             <span className="text-xl">{type === "success" ? "✅" : "⚠️"}</span>
             <span className="text-sm font-semibold">{message}</span>
@@ -123,23 +114,16 @@ function Toast({ message, type = "success", onDismiss }) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UPLOAD MODAL
-// ─────────────────────────────────────────────────────────────────────────────
 
 function UploadModal({ onClose, onSuccess }) {
     const [dragging, setDragging] = useState(false);
     const [file, setFile] = useState(null);
     const [progress, setProgress] = useState(0);
-    const [state, setState] = useState("idle"); // idle | uploading | success | error
-    const [phase, setPhase] = useState("uploading"); // uploading | analyzing | saving
+    const [state, setState] = useState("idle");
+    const [phase, setPhase] = useState("uploading");
     const [errorMsg, setErrorMsg] = useState("");
     const inputRef = useRef();
 
-    // Maps upload byte-progress to a phase label the user can follow.
-    // onUploadProgress fires while bytes travel to the server (0→100%).
-    // After bytes are sent the connection stays open while the server runs
-    // Whisper + AI analysis + DB save — we show "Analyzing" during that wait.
     const PHASE_LABELS = {
         uploading: "Uploading audio…",
         analyzing: "Analyzing conversation…",
@@ -173,19 +157,10 @@ function UploadModal({ onClose, onSuccess }) {
         const form = new FormData();
         form.append("audio", file);
         try {
-            // ─── FIX 1: timeout: 0 overrides the global 15 s limit for this
-            // request only. Whisper + AI analysis can take 60-180+ seconds
-            // depending on audio length. Without this, axios throws ECONNABORTED
-            // after 15 s even though the backend is still processing and will
-            // eventually return 200 OK — causing the false "Upload Failed" error.
             await api.post("/api/calls/upload", form, {
                 headers: { "Content-Type": "multipart/form-data" },
-                timeout: 0, // unlimited — backend controls when it responds
+                timeout: 0,
                 onUploadProgress: (e) => {
-                    // ─── FIX 2: track byte-upload progress separately from
-                    // server processing. Once bytes finish (100%) we switch to
-                    // the "analyzing" phase so the user sees useful feedback
-                    // instead of a stuck bar while the server works.
                     const pct = e.total
                         ? Math.round((e.loaded * 100) / e.total)
                         : 0;
@@ -195,7 +170,6 @@ function UploadModal({ onClose, onSuccess }) {
                     }
                 },
             });
-            // Server responded — briefly show "saving" before success screen
             setPhase("saving");
             await new Promise(r => setTimeout(r, 600));
             setState("success");
@@ -204,7 +178,6 @@ function UploadModal({ onClose, onSuccess }) {
                 onClose();
             }, 1800);
         } catch (err) {
-            // Distinguish timeout (shouldn't happen now) from real server errors
             const isTimeout = err.code === "ECONNABORTED";
             const serverMsg = typeof err.response?.data === "string"
                 ? err.response.data
@@ -218,18 +191,16 @@ function UploadModal({ onClose, onSuccess }) {
         }
     };
 
-    // Close on backdrop click
     const handleBackdrop = (e) => { if (e.target === e.currentTarget) onClose(); };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
             style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}
             onClick={handleBackdrop}>
-            <div className="relative w-full max-w-lg rounded-3xl border border-white/15 p-8"
+            <div className="relative w-full max-w-lg rounded-3xl border border-white/15 p-4 sm:p-8"
                 style={{ background: "linear-gradient(135deg, rgba(13,11,42,0.98) 0%, rgba(10,22,40,0.98) 100%)" }}
                 onClick={(e) => e.stopPropagation()}>
 
-                {/* Header */}
                 <div className="flex items-start justify-between mb-6">
                     <div>
                         <h2 className="text-xl font-black text-white">Upload Call Recording</h2>
@@ -269,7 +240,7 @@ function UploadModal({ onClose, onSuccess }) {
                         </div>
                         <div className="space-y-2">
                             <div className="flex justify-between text-xs text-slate-400">
-                                <span>{file?.name}</span>
+                                <span className="truncate max-w-[60%]">{file?.name}</span>
                                 <span className="text-violet-400 font-bold">
                                     {phase === "uploading" ? `${progress}%` : phase === "analyzing" ? "Processing…" : "Saving…"}
                                 </span>
@@ -282,13 +253,12 @@ function UploadModal({ onClose, onSuccess }) {
                     </div>
                 ) : (
                     <>
-                        {/* Drop zone */}
                         <div
                             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
                             onDragLeave={() => setDragging(false)}
                             onDrop={(e) => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]); }}
                             onClick={() => inputRef.current?.click()}
-                            className={`relative border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-300
+                            className={`relative border-2 border-dashed rounded-2xl p-6 sm:p-10 text-center cursor-pointer transition-all duration-300
                                 ${dragging ? "border-violet-400 bg-violet-500/10 scale-[1.02]" : "border-white/15 hover:border-violet-500/50 hover:bg-violet-500/5"}
                                 ${file ? "border-violet-500/50 bg-violet-500/5" : ""}`}>
                             <input ref={inputRef} type="file"
@@ -339,7 +309,7 @@ function UploadModal({ onClose, onSuccess }) {
                                 Cancel
                             </button>
                             <button onClick={handleUpload} disabled={!file}
-                                className="flex-2 w-full py-3 rounded-xl font-bold text-sm transition-all duration-200
+                                className="flex-1 py-3 rounded-xl font-bold text-sm transition-all duration-200
                                     bg-gradient-to-r from-violet-600 to-blue-600 text-white
                                     disabled:opacity-30 disabled:cursor-not-allowed
                                     hover:from-violet-500 hover:to-blue-500 hover:shadow-lg hover:shadow-violet-500/30
@@ -354,11 +324,8 @@ function UploadModal({ onClose, onSuccess }) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SENTIMENT PIE – redesigned
-// ─────────────────────────────────────────────────────────────────────────────
 
-const CHART_COLORS = ["#10b981", "#f59e0b", "#ef4444"]; // positive, neutral, negative
+const CHART_COLORS = ["#10b981", "#f59e0b", "#ef4444"];
 
 function SentimentChart({ data, total }) {
     if (total === 0) {
@@ -426,7 +393,6 @@ function SentimentChart({ data, total }) {
                 </PieChart>
             </ResponsiveContainer>
 
-            {/* Legend */}
             <div className="grid grid-cols-3 gap-2">
                 {data.map(({ name, value }, i) => {
                     const pct = total > 0 ? ((value / total) * 100).toFixed(0) : 0;
@@ -447,9 +413,6 @@ function SentimentChart({ data, total }) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CALL DETAIL PANEL
-// ─────────────────────────────────────────────────────────────────────────────
 
 function CallDetailPanel({ call }) {
     const [transcriptExpanded, setTranscriptExpanded] = useState(false);
@@ -465,7 +428,6 @@ function CallDetailPanel({ call }) {
 
     return (
         <div className="space-y-5">
-            {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-white/8">
                 <div className="flex-1 min-w-0">
                     <h3 className="text-lg font-black text-white truncate">{call.fileName}</h3>
@@ -492,7 +454,6 @@ function CallDetailPanel({ call }) {
                 </div>
             </div>
 
-            {/* Summary */}
             {call.summary && (
                 <div className="p-4 rounded-2xl border border-violet-500/20 bg-violet-500/5">
                     <p className="text-xs font-bold text-violet-400 uppercase tracking-wider mb-2">📋 Summary</p>
@@ -500,7 +461,6 @@ function CallDetailPanel({ call }) {
                 </div>
             )}
 
-            {/* Transcript */}
             {call.transcript && (
                 <div className="rounded-2xl border border-white/10 bg-white/3">
                     <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-white/8">
@@ -524,7 +484,6 @@ function CallDetailPanel({ call }) {
                 </div>
             )}
 
-            {/* Strengths + Improvements side by side */}
             {(strengths.length > 0 || improvements.length > 0) && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {strengths.length > 0 && (
@@ -562,12 +521,10 @@ function CallDetailPanel({ call }) {
                 </div>
             )}
 
-            {/* AI Insights — structured sections */}
             {insights.length > 0 && (
                 <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4">
                     <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-3">🧠 AI Insights</p>
                     {insights[0]?.bullets ? (
-                        // Fallback: no canonical labels found — render as bullets
                         <ul className="space-y-2">
                             {insights[0].bullets.map((line, i) => (
                                 <li key={i} className="flex items-start gap-2.5">
@@ -577,7 +534,6 @@ function CallDetailPanel({ call }) {
                             ))}
                         </ul>
                     ) : (
-                        // Structured: render each section as a labelled row
                         <div className="space-y-2.5">
                             {insights.map(section => (
                                 <div key={section.key}
@@ -600,7 +556,6 @@ function CallDetailPanel({ call }) {
                 </div>
             )}
 
-            {/* Keywords */}
             {keywords.length > 0 && (
                 <div>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">🔑 Keywords</p>
@@ -620,7 +575,6 @@ function CallDetailPanel({ call }) {
                 </div>
             )}
 
-            {/* QA Score breakdown */}
             {(call.communication || call.professionalism || call.problemResolution || call.customerSatisfaction) && (
                 <div>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">📊 QA Dimensions</p>
@@ -643,9 +597,6 @@ function CallDetailPanel({ call }) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN DASHBOARD
-// ─────────────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
     const [calls, setCalls] = useState([]);
@@ -655,7 +606,8 @@ export default function DashboardPage() {
     const [uploadOpen, setUploadOpen] = useState(false);
     const [selectedCall, setSelectedCall] = useState(null);
     const [toast, setToast] = useState(null);
-    const [playingId, setPlayingId] = useState(null); // mini audio player
+    const [playingId, setPlayingId] = useState(null);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     const user = getUser();
     const firstName = user?.name?.split(" ")[0] ?? "there";
@@ -667,7 +619,6 @@ export default function DashboardPage() {
             const res = await api.get("/api/calls/my-calls");
             const sorted = [...res.data].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             setCalls(sorted);
-            // Auto-select most recent call if none selected
             setSelectedCall(prev => prev ? sorted.find(c => c.id === prev.id) || sorted[0] : sorted[0]);
         } catch (err) {
             console.error("Failed to fetch calls:", err);
@@ -679,12 +630,25 @@ export default function DashboardPage() {
 
     useEffect(() => { fetchCalls(); }, [fetchCalls]);
 
-    // Close profile dropdown on outside click
     useEffect(() => {
         const handler = () => setProfileOpen(false);
         if (profileOpen) window.addEventListener("click", handler);
         return () => window.removeEventListener("click", handler);
     }, [profileOpen]);
+
+    useEffect(() => {
+        const onKey = (e) => { if (e.key === "Escape") setMobileMenuOpen(false); };
+        if (mobileMenuOpen) {
+            document.addEventListener("keydown", onKey);
+            document.body.style.overflow = "hidden";
+        } else {
+            document.body.style.overflow = "";
+        }
+        return () => {
+            document.removeEventListener("keydown", onKey);
+            document.body.style.overflow = "";
+        };
+    }, [mobileMenuOpen]);
 
     const handleLogout = () => {
         logoutAndRedirect();
@@ -695,7 +659,6 @@ export default function DashboardPage() {
         setToast({ message: "Call uploaded & analysed successfully!", type: "success" });
     };
 
-    // ── Analytics ─────────────────────────────────────────────────────────────
     const totalCalls = calls.length;
     const positiveCalls = calls.filter(c => c.sentiment === "POSITIVE").length;
     const negativeCalls = calls.filter(c => c.sentiment === "NEGATIVE").length;
@@ -717,7 +680,6 @@ export default function DashboardPage() {
         { name: "Negative", value: negativeCalls },
     ];
 
-    // Timeline
     const timelineMap = {};
     calls.forEach(c => {
         if (!c.createdAt) return;
@@ -727,33 +689,27 @@ export default function DashboardPage() {
 
     const timelineData = Object.entries(timelineMap).slice(-10).map(([date, count]) => ({ date, calls: count }));
 
-    // Keywords
     const allKeywords = calls.flatMap(c => c.keywords ? c.keywords.split(",") : []).map(k => k.trim()).filter(Boolean);
     const kwFreq = {};
     allKeywords.forEach(k => { kwFreq[k] = (kwFreq[k] || 0) + 1; });
     const topKeywords = Object.entries(kwFreq).sort((a, b) => b[1] - a[1]).slice(0, 12);
 
-    // Avg QA scores
     const avgQA = (key) => totalCalls > 0
         ? Math.round(calls.reduce((s, c) => s + (c[key] || 0), 0) / calls.length)
         : 0;
 
     const recentCalls = calls.slice(0, 8);
 
-    // ── Render ─────────────────────────────────────────────────────────────────
     return (
         <div className="min-h-screen text-white"
             style={{ background: "linear-gradient(135deg, #0a0a1a 0%, #0d0b2a 40%, #0a1628 100%)" }}>
 
-            {/* Noise texture */}
             <div className="fixed inset-0 pointer-events-none opacity-[0.025]"
                 style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")" }} />
 
-            {/* ── NAV ─────────────────────────────────────────────────────────── */}
             <header className="sticky top-0 z-40 border-b border-white/8 backdrop-blur-xl"
                 style={{ background: "rgba(10,10,26,0.88)" }}>
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-                    {/* Logo */}
                     <div className="flex items-center gap-2.5 flex-shrink-0">
                         <img src={logo} alt="Convexa AI" className="h-7 w-auto" />
                         <span className="text-base font-black tracking-tight hidden sm:block">
@@ -762,7 +718,6 @@ export default function DashboardPage() {
                         </span>
                     </div>
 
-                    {/* Nav links */}
                     <nav className="hidden md:flex items-center gap-1">
                         {[
                             { label: "Dashboard", path: "/dashboard" },
@@ -779,7 +734,6 @@ export default function DashboardPage() {
                         ))}
                     </nav>
 
-                    {/* Right side */}
                     <div className="flex items-center gap-3">
                         <button
                             onClick={() => setUploadOpen(true)}
@@ -791,7 +745,6 @@ export default function DashboardPage() {
                             <span className="hidden sm:inline">Upload</span>
                         </button>
 
-                        {/* Profile */}
                         <div className="relative" onClick={(e) => e.stopPropagation()}>
                             <button onClick={() => setProfileOpen(o => !o)}
                                 className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10
@@ -824,13 +777,99 @@ export default function DashboardPage() {
                                 </div>
                             )}
                         </div>
+
+                        {/* Hamburger — mobile only, rightmost item */}
+                        <button
+                            className="md:hidden flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all"
+                            onClick={() => setMobileMenuOpen(o => !o)}
+                            aria-label="Toggle navigation menu">
+                            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                {mobileMenuOpen
+                                    ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />}
+                            </svg>
+                        </button>
                     </div>
                 </div>
             </header>
 
+            {/* ── MOBILE NAV DRAWER (fixed overlay, slides from right) ── */}
+            {mobileMenuOpen && (
+                <>
+                    {/* Backdrop */}
+                    <div
+                        className="md:hidden fixed inset-0 z-50"
+                        style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+                        onClick={() => setMobileMenuOpen(false)}
+                        aria-hidden="true"
+                    />
+                    {/* Drawer panel */}
+                    <div
+                        className="md:hidden fixed top-0 right-0 h-full w-72 z-50 flex flex-col"
+                        style={{
+                            background: "linear-gradient(160deg, rgba(13,11,42,0.99) 0%, rgba(10,22,40,0.99) 100%)",
+                            borderLeft: "1px solid rgba(255,255,255,0.08)",
+                            backdropFilter: "blur(24px)",
+                            animation: "drawerSlideIn 0.25s cubic-bezier(0.32, 0.72, 0, 1)",
+                        }}>
+                        {/* Drawer header */}
+                        <div className="flex items-center justify-between px-5 h-16 border-b border-white/8 flex-shrink-0">
+                            <span className="text-sm font-bold text-white/60 uppercase tracking-widest">Navigation</span>
+                            <button
+                                onClick={() => setMobileMenuOpen(false)}
+                                className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all"
+                                aria-label="Close menu">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        {/* Nav links */}
+                        <nav className="flex flex-col gap-1 p-4 flex-1">
+                            {[
+                                { label: "Dashboard",    path: "/dashboard",  icon: "📊", desc: "Overview & recent calls" },
+                                { label: "Call History", path: "/history",    icon: "📋", desc: "Browse all recordings"   },
+                                { label: "Analytics",    path: "/analytics",  icon: "📈", desc: "Trends & insights"       },
+                            ].map(({ label, path, icon, desc }) => (
+                                <Link
+                                    key={label}
+                                    to={path}
+                                    onClick={() => setMobileMenuOpen(false)}
+                                    className={`flex items-center gap-3.5 px-4 py-3.5 rounded-xl text-sm font-semibold transition-all group
+                                        ${path === "/dashboard"
+                                            ? "bg-white/10 text-white border border-white/10"
+                                            : "text-slate-400 hover:text-white hover:bg-white/6 border border-transparent hover:border-white/8"}`}>
+                                    <span className="text-xl w-7 text-center flex-shrink-0">{icon}</span>
+                                    <div className="flex flex-col min-w-0">
+                                        <span className="truncate">{label}</span>
+                                        <span className="text-xs font-normal text-slate-600 group-hover:text-slate-500 transition-colors">{desc}</span>
+                                    </div>
+                                    {path === "/dashboard" && (
+                                        <span className="ml-auto w-1.5 h-1.5 rounded-full bg-violet-400 flex-shrink-0" />
+                                    )}
+                                </Link>
+                            ))}
+                        </nav>
+
+                        {/* Footer user row */}
+                        <div className="px-5 py-4 border-t border-white/8 flex-shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                    {user?.name?.[0]?.toUpperCase() ?? "U"}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-bold text-white truncate">{user?.name}</p>
+                                    <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </>
+            )}
+
             <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
 
-                {/* ── ERROR BANNER ── */}
                 {error && (
                     <div className="flex items-center gap-3 p-4 rounded-2xl border border-red-500/30 bg-red-500/10 text-red-300">
                         <span>⚠️</span>
@@ -841,12 +880,10 @@ export default function DashboardPage() {
                     </div>
                 )}
 
-                {/* ── HERO SECTION ── */}
                 <section className="relative overflow-hidden rounded-3xl border border-white/10 p-7 md:p-10"
                     style={{ background: "linear-gradient(135deg, rgba(139,92,246,0.14) 0%, rgba(59,130,246,0.09) 100%)" }}>
                     <div className="absolute inset-0 pointer-events-none"
                         style={{ background: "radial-gradient(ellipse at 0% 50%, rgba(139,92,246,0.15) 0%, transparent 55%), radial-gradient(ellipse at 100% 50%, rgba(59,130,246,0.12) 0%, transparent 55%)" }} />
-                    {/* Glow orbs */}
                     <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full opacity-20 blur-3xl pointer-events-none"
                         style={{ background: "radial-gradient(circle, #8b5cf6, transparent)" }} />
                     <div className="absolute -bottom-8 -left-8 w-40 h-40 rounded-full opacity-15 blur-3xl pointer-events-none"
@@ -867,7 +904,7 @@ export default function DashboardPage() {
                             </p>
                         </div>
 
-                        <div className="flex items-center gap-5 flex-shrink-0">
+                        <div className="flex items-center gap-4 sm:gap-5 flex-wrap sm:flex-nowrap sm:flex-shrink-0">
                             {loading ? (
                                 <Skeleton className="w-20 h-20 rounded-full" />
                             ) : (
@@ -883,7 +920,7 @@ export default function DashboardPage() {
                                     { v: bestScore, l: "Best Score" },
                                     { v: `${negativePercent}%`, l: "Negative" },
                                 ].map(({ v, l }) => (
-                                    <div key={l} className="text-center px-4 py-2.5 rounded-xl bg-white/5 border border-white/8">
+                                    <div key={l} className="text-center px-2 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-white/5 border border-white/8">
                                         <p className="text-lg font-black text-white">{loading ? "–" : v}</p>
                                         <p className="text-xs text-slate-500 font-medium">{l}</p>
                                     </div>
@@ -893,7 +930,6 @@ export default function DashboardPage() {
                     </div>
                 </section>
 
-                {/* ── STAT CARDS ── */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {loading ? (
                         Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-32" />)
@@ -908,7 +944,6 @@ export default function DashboardPage() {
                     )}
                 </div>
 
-                {/* Sentiment progress bar */}
                 {totalCalls > 0 && !loading && (
                     <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4">
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Sentiment Breakdown</p>
@@ -930,7 +965,6 @@ export default function DashboardPage() {
                     </div>
                 )}
 
-                {/* ── EMPTY STATE ── */}
                 {!loading && totalCalls === 0 && (
                     <div className="text-center py-24 rounded-3xl border border-white/8 border-dashed"
                         style={{ background: "rgba(255,255,255,0.015)" }}>
@@ -956,9 +990,7 @@ export default function DashboardPage() {
 
                 {totalCalls > 0 && (
                     <>
-                        {/* ── CHARTS ROW ── */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            {/* Sentiment donut – redesigned */}
                             <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
                                 <div className="flex items-center justify-between mb-5">
                                     <p className="text-sm font-bold text-slate-400 uppercase tracking-wider">Sentiment Distribution</p>
@@ -972,7 +1004,6 @@ export default function DashboardPage() {
                                 }
                             </div>
 
-                            {/* Timeline */}
                             <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
                                 <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-5">Call Activity Timeline</p>
                                 {loading ? (
@@ -1003,7 +1034,6 @@ export default function DashboardPage() {
                             </div>
                         </div>
 
-                        {/* ── AVG QA DIMENSIONS ── */}
                         {calls.some(c => c.communication || c.professionalism) && (
                             <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
                                 <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-5">Average QA Dimensions</p>
@@ -1023,11 +1053,9 @@ export default function DashboardPage() {
                             </div>
                         )}
 
-                        {/* ── RECENT CALLS + DETAIL SPLIT ── */}
                         <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 items-start">
 
-                            {/* Call list */}
-                            <div className="xl:col-span-2 rounded-2xl border border-white/10 bg-white/5 p-5">
+                            <div className="xl:col-span-2 rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
                                 <div className="flex items-center justify-between mb-4">
                                     <p className="text-sm font-bold text-slate-400 uppercase tracking-wider">Recent Calls</p>
                                     <span className="text-xs text-violet-400 font-bold px-3 py-1 rounded-full bg-violet-500/10 border border-violet-500/20">
@@ -1046,11 +1074,10 @@ export default function DashboardPage() {
                                             const isSelected = selectedCall?.id === call.id;
                                             return (
                                                 <div key={call.id}
-                                                    className={`w-full flex items-center gap-3 p-3.5 rounded-xl border transition-all group
+                                                    className={`w-full flex items-center gap-2 sm:gap-3 p-3 sm:p-3.5 rounded-xl border transition-all group
                                                         ${isSelected
                                                             ? "border-violet-500/40 bg-violet-500/10"
                                                             : "border-white/6 bg-white/2 hover:bg-white/5 hover:border-white/12"}`}>
-                                                    {/* Mini audio button */}
                                                     <MiniAudioPlayer
                                                         cloudinaryUrl={call.cloudinaryUrl}
                                                         playingId={playingId}
@@ -1058,7 +1085,6 @@ export default function DashboardPage() {
                                                         onPlay={setPlayingId}
                                                         onStop={() => setPlayingId(null)}
                                                     />
-                                                    {/* Info — clickable to select */}
                                                     <button
                                                         onClick={() => setSelectedCall(call)}
                                                         className="flex-1 min-w-0 text-left">
@@ -1090,8 +1116,7 @@ export default function DashboardPage() {
                                 )}
                             </div>
 
-                            {/* Call detail */}
-                            <div className="xl:col-span-3 rounded-2xl border border-white/10 bg-white/5 p-6 min-h-64">
+                            <div className="xl:col-span-3 rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-6 min-h-64 overflow-hidden">
                                 {loading ? (
                                     <div className="space-y-4">
                                         <Skeleton className="h-8 w-2/3" />
@@ -1109,7 +1134,6 @@ export default function DashboardPage() {
                             </div>
                         </div>
 
-                        {/* ── KEYWORD INTELLIGENCE ── */}
                         {topKeywords.length > 0 && (
                             <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
                                 <div className="flex items-center justify-between mb-5">
@@ -1143,7 +1167,7 @@ export default function DashboardPage() {
                                 <div className="space-y-2.5">
                                     {topKeywords.slice(0, 8).map(([kw, cnt]) => (
                                         <div key={kw} className="flex items-center gap-3">
-                                            <span className="w-28 text-xs text-slate-300 font-medium truncate text-right">{kw}</span>
+                                            <span className="w-20 sm:w-28 text-xs text-slate-300 font-medium truncate text-right">{kw}</span>
                                             <div className="flex-1 h-1.5 rounded-full overflow-hidden bg-white/8">
                                                 <div className="h-1.5 rounded-full bg-gradient-to-r from-violet-500 to-blue-500 transition-all duration-700"
                                                     style={{ width: `${(cnt / topKeywords[0][1]) * 100}%` }} />
@@ -1158,16 +1182,13 @@ export default function DashboardPage() {
                 )}
             </main>
 
-            {/* ── FOOTER ── */}
             <footer className="border-t border-white/6 mt-12 py-5">
                 <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-2">
                     <span className="text-xs text-slate-600">© 2026 Convexa AI · Conversation Intelligence Platform</span>
-                    {/* CHANGED: updated from "Ollama · Qwen 2.5" to reflect the current AI stack */}
                     <span className="text-xs text-slate-700">Powered by Whisper · Groq · Llama 3.3</span>
                 </div>
             </footer>
 
-            {/* ── UPLOAD MODAL ── */}
             {uploadOpen && (
                 <UploadModal
                     onClose={() => setUploadOpen(false)}
@@ -1175,7 +1196,6 @@ export default function DashboardPage() {
                 />
             )}
 
-            {/* ── TOAST ── */}
             {toast && (
                 <Toast
                     message={toast.message}
@@ -1184,11 +1204,14 @@ export default function DashboardPage() {
                 />
             )}
 
-            {/* ── ANIMATION KEYFRAMES ── */}
             <style>{`
                 @keyframes slideUp {
                     from { transform: translateY(24px); opacity: 0; }
                     to   { transform: translateY(0);    opacity: 1; }
+                }
+                @keyframes drawerSlideIn {
+                    from { transform: translateX(100%); }
+                    to   { transform: translateX(0); }
                 }
             `}</style>
         </div>
