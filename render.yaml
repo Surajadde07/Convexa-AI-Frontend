@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: convexa-ai-frontend
+    runtime: static
+    buildCommand: npm run build
+    staticPublishPath: ./dist
+    headers:
+      - path: /*
+        name: Cross-Origin-Opener-Policy
+        value: same-origin-allow-popups
+      - path: /*
+        name: Cross-Origin-Embedder-Policy
+        value: unsafe-none
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
