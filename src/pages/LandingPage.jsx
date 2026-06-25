@@ -192,11 +192,55 @@ const globalStyles = `
   ::-webkit-scrollbar-track { background: #05050a; }
   ::-webkit-scrollbar-thumb { background: rgba(139,92,246,0.4); border-radius: 3px; }
 
+  /* ── Mobile drawer ── */
+  @keyframes drawerSlideIn {
+    from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .mobile-drawer {
+    animation: drawerSlideIn 0.22s ease forwards;
+  }
+  .mobile-nav-link {
+    display: flex;
+    align-items: center;
+    padding: 14px 20px;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 500;
+    color: rgba(226,232,240,0.8);
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+  }
+  .mobile-nav-link:hover {
+    background: rgba(255,255,255,0.05);
+    color: #fff;
+    border-color: rgba(255,255,255,0.08);
+  }
+  .hamburger-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+  }
+  .hamburger-btn:hover {
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.18);
+  }
+
   /* ── Responsive utilities ── */
   .hidden-mobile { display: flex; }
 
   @media (max-width: 767px) {
     .hidden-mobile { display: none !important; }
+    .hamburger-btn { display: flex !important; }
+    .desktop-cta { display: none !important; }
 
     /* Hero: stack columns */
     .hero-grid {
@@ -249,6 +293,15 @@ const globalStyles = `
     /* Navbar CTA buttons: hide "Log in" on very small screens to save space */
     .nav-login-btn {
       display: none !important;
+    }
+    /* Analytics dashboard: reduce padding on mobile */
+    .analytics-dashboard-inner {
+      padding: 16px !important;
+    }
+
+    /* Ticker: ensure it never causes horizontal scroll */
+    .ticker-wrap {
+      overflow: hidden !important;
     }
   }
 
@@ -310,7 +363,7 @@ function useReveal() {
 ───────────────────────────────────────── */
 function BgOrbs() {
     return (
-        <div className="pointer-events-none fixed inset-0 overflow-hidden z-0">
+        <div className="pointer-events-none fixed inset-0 overflow-hidden z-0" style={{ overflow: 'hidden' }}>
             <div style={{
                 position: 'absolute', top: '-20%', left: '-10%',
                 width: 700, height: 700, borderRadius: '50%',
@@ -339,6 +392,7 @@ function BgOrbs() {
 function Navbar() {
     const [scrolled, setScrolled] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
+    const drawerRef = useRef(null);
 
     useEffect(() => {
         const handler = () => setScrolled(window.scrollY > 30);
@@ -346,54 +400,60 @@ function Navbar() {
         return () => window.removeEventListener("scroll", handler);
     }, []);
 
+    // Close drawer on outside click
+    useEffect(() => {
+        if (!mobileOpen) return;
+        const handleOutside = (e) => {
+            if (drawerRef.current && !drawerRef.current.contains(e.target)) {
+                setMobileOpen(false);
+            }
+        };
+        // slight delay so the open-click itself doesn't immediately close
+        const t = setTimeout(() => document.addEventListener('mousedown', handleOutside), 10);
+        return () => { clearTimeout(t); document.removeEventListener('mousedown', handleOutside); };
+    }, [mobileOpen]);
+
+    // Close drawer on scroll (UX: user started scrolling, collapse menu)
+    useEffect(() => {
+        if (!mobileOpen) return;
+        const onScroll = () => setMobileOpen(false);
+        window.addEventListener('scroll', onScroll, { passive: true });
+        return () => window.removeEventListener('scroll', onScroll);
+    }, [mobileOpen]);
+
+    const navItems = ['Features', 'How It Works', 'Pricing', 'About'];
+    const close = () => setMobileOpen(false);
+
     return (
-        <nav style={{
+        <nav ref={drawerRef} style={{
             position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
             transition: 'all 0.3s ease',
-            background: scrolled ? 'rgba(5,5,10,0.85)' : 'transparent',
-            backdropFilter: scrolled ? 'blur(24px)' : 'none',
-            borderBottom: scrolled ? '1px solid rgba(255,255,255,0.06)' : '1px solid transparent',
+            background: scrolled || mobileOpen ? 'rgba(5,5,10,0.95)' : 'transparent',
+            backdropFilter: scrolled || mobileOpen ? 'blur(24px)' : 'none',
+            borderBottom: scrolled || mobileOpen ? '1px solid rgba(255,255,255,0.06)' : '1px solid transparent',
         }}>
             <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 24px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 68 }}>
 
                     {/* LOGO */}
-                    {/* LOGO */}
                     <Link
                         to="/"
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 12,
-                            textDecoration: 'none'
-                        }}
+                        onClick={close}
+                        style={{ display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none' }}
                     >
                         <img
                             src={logo}
                             alt="Convexa AI"
-                            style={{
-                                height: 50,
-                                width: 'auto',
-                                objectFit: 'contain'
-                            }}
+                            style={{ height: 50, width: 'auto', objectFit: 'contain' }}
                         />
-
-                        <span
-                            className="font-display"
-                            style={{
-                                fontSize: 22,
-                                fontWeight: 800,
-                                color: '#fff',
-                                letterSpacing: '-0.02em'
-                            }}
-                        >
+                        <span className="font-display" style={{ fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: '-0.02em' }}>
                             Convexa <span className="gradient-text">AI</span>
                         </span>
                     </Link>
 
                     {/* DESKTOP NAV */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} className="hidden-mobile">
-                        {['Features', 'How It Works', 'Pricing', 'About'].map(item => (
+                        {navItems.map(item => (
                             <a key={item} href={`#${item.toLowerCase().replace(/ /g, '-')}`}
                                 style={{
                                     padding: '8px 16px', borderRadius: 8, fontSize: 14, fontWeight: 500,
@@ -406,8 +466,8 @@ function Navbar() {
                         ))}
                     </div>
 
-                    {/* CTA */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    {/* DESKTOP CTA */}
+                    <div className="desktop-cta" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <Link to="/login" className="nav-login-btn" style={{
                             padding: '8px 18px', borderRadius: 8, fontSize: 14, fontWeight: 500,
                             color: 'rgba(226,232,240,0.8)', textDecoration: 'none',
@@ -429,8 +489,83 @@ function Navbar() {
                             onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(124,58,237,0.4)'; }}
                         >Get Started →</Link>
                     </div>
+
+                    {/* HAMBURGER — mobile only */}
+                    <button
+                        className="hamburger-btn"
+                        onClick={() => setMobileOpen(o => !o)}
+                        aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+                        aria-expanded={mobileOpen}
+                        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                    >
+                        {/* Animated icon: 3 bars → X */}
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                            <style>{`
+                              .hb-bar { transform-origin: center; transition: transform 0.25s ease, opacity 0.25s ease; }
+                            `}</style>
+                            <rect className="hb-bar" x="2" y="5" width="16" height="2" rx="1" fill="rgba(226,232,240,0.9)"
+                                style={{ transform: mobileOpen ? 'translateY(3px) rotate(45deg)' : 'none' }} />
+                            <rect className="hb-bar" x="2" y="9" width="16" height="2" rx="1" fill="rgba(226,232,240,0.9)"
+                                style={{ opacity: mobileOpen ? 0 : 1 }} />
+                            <rect className="hb-bar" x="2" y="13" width="16" height="2" rx="1" fill="rgba(226,232,240,0.9)"
+                                style={{ transform: mobileOpen ? 'translateY(-3px) rotate(-45deg)' : 'none' }} />
+                        </svg>
+                    </button>
                 </div>
             </div>
+
+            {/* MOBILE DRAWER — floating panel below navbar bar */}
+            {mobileOpen && (
+                <div className="mobile-drawer" style={{
+                    position: 'absolute', top: 68, left: 12, right: 12,
+                    borderRadius: 20,
+                    background: 'rgba(8,8,18,0.97)',
+                    backdropFilter: 'blur(40px)',
+                    border: '1px solid rgba(255,255,255,0.09)',
+                    boxShadow: '0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(124,58,237,0.12)',
+                    padding: '12px 12px 20px',
+                    zIndex: 99,
+                }}>
+                    {/* Nav links */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }}>
+                        {navItems.map(item => (
+                            <a
+                                key={item}
+                                href={`#${item.toLowerCase().replace(/ /g, '-')}`}
+                                className="mobile-nav-link font-display"
+                                onClick={close}
+                            >
+                                {item}
+                            </a>
+                        ))}
+                    </div>
+
+                    {/* Divider */}
+                    <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', marginBottom: 16 }} />
+
+                    {/* CTA buttons */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '0 8px' }}>
+                        <Link to="/login" onClick={close} style={{
+                            display: 'block', textAlign: 'center',
+                            padding: '12px 20px', borderRadius: 12, fontSize: 15, fontWeight: 600,
+                            color: 'rgba(226,232,240,0.85)', textDecoration: 'none',
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                        }}>
+                            Log in
+                        </Link>
+                        <Link to="/register" onClick={close} className="btn-glow" style={{
+                            display: 'block', textAlign: 'center',
+                            padding: '13px 20px', borderRadius: 12, fontSize: 15, fontWeight: 700,
+                            color: '#fff', textDecoration: 'none',
+                            background: 'linear-gradient(135deg, #7c3aed, #4f46e5)',
+                            boxShadow: '0 6px 24px rgba(124,58,237,0.45)',
+                        }}>
+                            Get Started →
+                        </Link>
+                    </div>
+                </div>
+            )}
         </nav>
     );
 }
@@ -536,7 +671,7 @@ function Hero() {
                     </div>
 
                     {/* RIGHT — DASHBOARD PREVIEW */}
-                    <div className="hero-right" style={{ position: 'relative', animation: 'scaleIn 1s ease both', animationDelay: '0.2s' }}>
+                    <div className="hero-right" style={{ position: 'relative', animation: 'scaleIn 1s ease both', animationDelay: '0.2s', overflow: 'hidden', padding: '30px 30px 30px 30px' }}>
 
                         {/* Glow behind card */}
                         <div style={{
@@ -644,7 +779,7 @@ function Hero() {
 
                         {/* Floating badges */}
                         <div className="animate-float" style={{
-                            position: 'absolute', top: -20, right: -24, zIndex: 2,
+                            position: 'absolute', top: 0, right: 0, zIndex: 2,
                             padding: '10px 16px', borderRadius: 12,
                             background: 'rgba(34,197,94,0.12)', backdropFilter: 'blur(16px)',
                             border: '1px solid rgba(34,197,94,0.25)',
@@ -652,7 +787,7 @@ function Hero() {
                             <div style={{ fontSize: 11, fontWeight: 700, color: '#4ade80' }}>↑ 24% CSAT this week</div>
                         </div>
                         <div className="animate-float2" style={{
-                            position: 'absolute', bottom: 30, left: -28, zIndex: 2,
+                            position: 'absolute', bottom: 30, left: 0, zIndex: 2,
                             padding: '10px 16px', borderRadius: 12,
                             background: 'rgba(99,102,241,0.12)', backdropFilter: 'blur(16px)',
                             border: '1px solid rgba(99,102,241,0.25)',
@@ -907,6 +1042,7 @@ function AnalyticsShowcase() {
                     borderRadius: 28, overflow: 'hidden',
                     background: 'rgba(8,8,18,0.9)', backdropFilter: 'blur(40px)',
                     boxShadow: '0 40px 100px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05)',
+                    maxWidth: '100%',
                 }}>
                     {/* Top bar */}
                     <div style={{ padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -921,7 +1057,7 @@ function AnalyticsShowcase() {
                     </div>
 
                     {/* Dashboard content */}
-                    <div style={{ padding: 32 }}>
+                    <div className="analytics-dashboard-inner" style={{ padding: 32 }}>
 
                         {/* Stat row */}
                         <div className="analytics-stat-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 16, marginBottom: 28 }}>
@@ -1365,7 +1501,7 @@ export default function LandingPage() {
     return (
         <>
             <style>{globalStyles}</style>
-            <div style={{ background: '#05050a', minHeight: '100vh', position: 'relative' }}>
+            <div style={{ background: '#05050a', minHeight: '100vh', position: 'relative', overflowX: 'hidden' }}>
                 <BgOrbs />
                 <Navbar />
                 <Hero />
