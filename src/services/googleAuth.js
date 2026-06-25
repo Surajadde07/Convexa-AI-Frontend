@@ -1,59 +1,40 @@
 /**
  * googleAuth.js
  *
- * ── REWRITE RATIONALE ─────────────────────────────────────────────────────
+ * ── BUG FIX: stale `initialized` flag + stale `activeCallback` ───────────
  *
- * The previous version used:
- *   - use_fedcm_for_prompt: true
- *   - google.accounts.id.prompt()           (One Tap)
- *   - google.accounts.id.renderButton()      (fallback only, into a visible div)
+ * PROBLEM:
+ *   `initialized` was a module-scoped boolean that was set to `true` once
+ *   and never reset. `activeCallback` was also module-scoped.
  *
- * This combination is the root cause of every reported symptom:
+ *   When the Google login flow triggered a 401 on a background request,
+ *   the response interceptor in api.js redirected to /login, which caused
+ *   the React tree to unmount and remount LoginPage + GoogleAuthButton.
  *
- *   "The given origin is not allowed for the given client ID"
- *   → FedCM's origin-validation handshake is unreliable on http://localhost
- *     even when the origin IS correctly whitelisted in Cloud Console.
- *     FedCM was designed assuming HTTPS; Chrome's FedCM implementation
- *     frequently rejects plain-HTTP origins during local development.
+ *   On remount, GoogleAuthButton called initializeGoogleAuth(newCallback).
+ *   Because `initialized === true`, the function returned early WITHOUT
+ *   updating `activeCallback`. The GIS button rendered fine (renderGoogleButton
+ *   has no such guard), the user clicked it, GIS fired — but the callback
+ *   still pointed at the PREVIOUS component instance's closure. That closure
+ *   held a stale `navigate`, stale `setLoading`, stale `onError`, and in
+ *   some cases a stale `authAPI` reference. The result: either the backend
+ *   was never called, or the response was silently swallowed and the UI
+ *   showed nothing.
  *
- *   "Second Google button appears"
- *   → One Tap (`prompt()`) was suppressed (a direct consequence of the
- *     FedCM failure above), which triggered the renderButton() fallback —
- *     stacking Google's official button on top of the custom button the
- *     user already clicked.
+ * FIX:
+ *   `activeCallback` is always updated regardless of whether the GIS SDK
+ *   has already been initialized. The `initialized` flag guards only the
+ *   one-time `google.accounts.id.initialize()` call (which must only run
+ *   once per page lifetime per GIS contract). The callback registration
+ *   inside GIS itself uses the `activeCallback` indirection, so updating
+ *   activeCallback is sufficient — GIS will call the new closure on next
+ *   credential selection without needing re-initialization.
  *
- *   "Account selection succeeds but nothing happens / backend never called"
- *   → "Cross-Origin-Opener-Policy policy would block the window.postMessage
- *     call" — when the fallback-rendered button opens a popup-style account
- *     chooser, GIS delivers the credential back to the parent window via
- *     postMessage. If anything in the response chain sets a COOP header,
- *     that postMessage is silently dropped and the registered callback is
- *     NEVER invoked. No error surfaces because no request to your backend
- *     is ever made.
- *
- * ── THE FIX ──────────────────────────────────────────────────────────────
- *
- * Removed entirely:
- *   - use_fedcm_for_prompt
- *   - prompt() / One Tap
- *   - the "render only on fallback" pattern
- *
- * New approach — the simplest one that Google's own docs recommend for
- * maximum cross-browser / cross-environment reliability:
- *
- *   1. initialize() once, exactly as before (this part was already correct
- *      and is kept).
- *   2. renderButton() is now the ONLY rendering path — called immediately,
- *      always, into a div that IS the visible button. There is no separate
- *      custom button anymore. What the user sees IS the official Google
- *      button from the very first render. No second button can appear
- *      because there is only ever one button in the DOM.
- *   3. No popup. The official renderButton() flow (without FedCM) delivers
- *      the credential via a direct callback invocation in the same
- *      JS execution context — no cross-window postMessage, no COOP issue.
- *
- * googleSignOut() is unchanged — disableAutoSelect() on logout is still
- * correct practice regardless of which flow is used above it.
+ *   This means:
+ *   - GIS SDK: initialized once ✓
+ *   - google.accounts.id.initialize(): called once ✓
+ *   - activeCallback: always points to the latest mounted component ✓
+ *   - No stale closures ✓
  */
 
 let scriptLoadPromise = null;
@@ -67,101 +48,102 @@ const GIS_SRC = "https://accounts.google.com/gsi/client";
  * window.google.accounts.id is ready to use.
  */
 export function loadGoogleScript() {
-    if (scriptLoadPromise) return scriptLoadPromise;
+  if (scriptLoadPromise) return scriptLoadPromise;
 
-    scriptLoadPromise = new Promise((resolve, reject) => {
-        if (window.google?.accounts?.id) {
-            resolve();
-            return;
-        }
+  scriptLoadPromise = new Promise((resolve, reject) => {
+    if (window.google?.accounts?.id) {
+      resolve();
+      return;
+    }
 
-        const existing = document.querySelector(`script[src="${GIS_SRC}"]`);
-        const script = existing || document.createElement("script");
+    const existing = document.querySelector(`script[src="${GIS_SRC}"]`);
+    const script   = existing || document.createElement("script");
 
-        if (!existing) {
-            script.src   = GIS_SRC;
-            script.async = true;
-            script.defer = true;
-            document.head.appendChild(script);
-        }
+    if (!existing) {
+      script.src   = GIS_SRC;
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
 
-        script.addEventListener("load", () => resolve());
-        script.addEventListener("error", () =>
-            reject(new Error("Failed to load Google Identity Services script"))
-        );
-    });
+    script.addEventListener("load",  () => resolve());
+    script.addEventListener("error", () =>
+      reject(new Error("Failed to load Google Identity Services script"))
+    );
+  });
 
-    return scriptLoadPromise;
+  return scriptLoadPromise;
 }
 
 /**
- * Initializes GIS exactly once for the lifetime of the page.
+ * Prepares GIS for use.
  *
- * NOTE: use_fedcm_for_prompt has been removed. FedCM is only relevant to
- * the One Tap prompt() flow, which this file no longer uses. Removing it
- * eliminates the "origin not allowed" / "FedCM NetworkError" failures that
- * occurred specifically on http://localhost during local development.
+ * ALWAYS updates activeCallback so the latest mounted component's closure
+ * is used — regardless of whether GIS was already initialized.
+ *
+ * google.accounts.id.initialize() is called only once (GIS requirement).
+ * The callback passed to initialize() is a stable wrapper that delegates
+ * to activeCallback, so updating activeCallback is sufficient to "re-wire"
+ * the credential response to the current component.
  *
  * @param {(credentialResponse: { credential: string }) => void} onCredential
  */
 export async function initializeGoogleAuth(onCredential) {
-    await loadGoogleScript();
+  await loadGoogleScript();
 
-    activeCallback = onCredential;
+  // ── CRITICAL FIX: always update the active callback ──────────────────────
+  // This must happen BEFORE the `initialized` early-return so that remounted
+  // components always receive their credential responses, even when GIS
+  // was initialized by an earlier mount.
+  activeCallback = onCredential;
 
-    if (initialized) return;
-    initialized = true;
+  if (initialized) return;
+  initialized = true;
 
-    window.google.accounts.id.initialize({
-        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-        callback: (response) => {
-            if (activeCallback) activeCallback(response);
-        },
-        // auto_select left false — never silently sign a returning user in
-        // without an explicit click; avoids surprising behaviour and the
-        // FedCM auto-select edge cases entirely.
-        auto_select: false,
-        // use_fedcm_for_prompt removed — this file no longer calls prompt()
-        // at all, so the flag has no effect and only existed to enable a
-        // code path that was actively causing failures.
-    });
+  window.google.accounts.id.initialize({
+    client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+    // The callback is a stable wrapper — it delegates to `activeCallback`,
+    // which is always the latest mounted component's handler (updated above).
+    callback: (response) => {
+      if (activeCallback) activeCallback(response);
+    },
+    auto_select: false,
+    // use_fedcm_for_prompt intentionally omitted — see original rationale.
+  });
 }
 
 /**
  * Renders the official Google Sign-In button into the given element.
- * This is now the ONLY way a Google button appears on the page — there is
- * no custom button and no One Tap prompt, so there is no possibility of
- * two buttons ever being visible simultaneously.
+ * This is the only rendering path — no custom button, no One Tap prompt.
  *
- * Safe to call multiple times for the same element (e.g. on re-render) —
- * GIS replaces the previous button content in place.
+ * Safe to call multiple times for the same element — GIS replaces the
+ * previous button content in place.
  *
  * @param {string} elementId - id of the <div> the button should render into
  */
 export function renderGoogleButton(elementId) {
-    if (!window.google?.accounts?.id) return;
+  if (!window.google?.accounts?.id) return;
 
-    const el = document.getElementById(elementId);
-    if (!el) return;
+  const el = document.getElementById(elementId);
+  if (!el) return;
 
-    window.google.accounts.id.renderButton(el, {
-        theme:  "filled_black",
-        size:   "large",
-        width:  340,
-        text:   "continue_with",
-        shape:  "rectangular",
-    });
+  window.google.accounts.id.renderButton(el, {
+    theme: "filled_black",
+    size:  "large",
+    width: 340,
+    text:  "continue_with",
+    shape: "rectangular",
+  });
 }
 
 /**
- * Call this on logout. Tells GIS that the user has explicitly signed out,
- * clearing the auto-select credential state so a future sign-in shows the
- * account chooser again rather than silently re-selecting the same account.
+ * Call this on logout. Clears GIS auto-select state so the next sign-in
+ * shows the account chooser instead of silently reselecting the same account.
  */
 export function googleSignOut() {
-    try {
-        window.google?.accounts?.id?.disableAutoSelect();
-    } catch {
-        // GIS not loaded yet — nothing to disable, safe to ignore
-    }
+  try {
+    window.google?.accounts?.id?.disableAutoSelect();
+  } catch {
+    // GIS not loaded — nothing to disable
+  }
 }
