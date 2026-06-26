@@ -1,9 +1,36 @@
+# render.yaml — place this at the ROOT of your frontend project (next to package.json)
+#
+# This file tells Render how to build and serve your Vite SPA.
+#
+# THE CRITICAL FIX — two problems solved here:
+#
+# 1. SPA ROUTING (routes → rewrite):
+#    Without this, every direct navigation or page refresh to a React route
+#    like /login, /dashboard, /signup returns a real 404 from Render's CDN
+#    because there is no physical file at that path — only index.html.
+#    The rewrite rule sends ALL requests (that don't match a real file) to
+#    /index.html so React Router handles routing client-side.
+#    This is WHY clearing localStorage "fixed" Google login: clearing storage
+#    removed the stale JWT, so the 401 interceptor never fired, so
+#    window.location.replace("/login") never ran, so no 404 ever happened.
+#
+# 2. COOP HEADER (headers → Cross-Origin-Opener-Policy):
+#    Render sets COOP: same-origin by default on all static deployments.
+#    Google Identity Services delivers credentials via postMessage from a
+#    cross-origin iframe. COOP: same-origin severs the browsing context
+#    group, silently blocking that postMessage — the credential never
+#    arrives, your backend is never called, and the user sees
+#    "Google sign-in failed".
+#    same-origin-allow-popups allows GIS's popup/iframe postMessage through
+#    while still protecting against unrelated cross-origin openers.
+
 services:
   - type: web
     name: convexa-ai-frontend
     runtime: static
     buildCommand: npm run build
     staticPublishPath: ./dist
+
     headers:
       - path: /*
         name: Cross-Origin-Opener-Policy
@@ -11,7 +38,14 @@ services:
       - path: /*
         name: Cross-Origin-Embedder-Policy
         value: unsafe-none
+      - path: /*
+        name: Cache-Control
+        value: no-store, no-cache, must-revalidate, proxy-revalidate
+
     routes:
+      # SPA fallback — any path that doesn't match a real file in /dist
+      # gets rewritten to /index.html so React Router handles it.
+      # This is the fix for the /login 404.
       - type: rewrite
         source: /*
         destination: /index.html

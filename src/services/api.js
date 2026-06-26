@@ -28,29 +28,42 @@ api.interceptors.request.use(
 // ─────────────────────────────────────────
 //  RESPONSE INTERCEPTOR — handle 401
 //
-//  BUG FIX: The previous interceptor called window.location.href = "/login"
-//  on ANY 401 response. This caused two critical failures:
+//  ROOT CAUSE OF THE DAILY BREAK:
 //
-//  1. If a background/prefetch request got a 401 while the Google OAuth
-//     callback was mid-flight (e.g., authAPI.googleLogin() was in-progress),
-//     the redirect fired immediately, unloading the page and cancelling the
-//     Google login request. The browser logged a 404 for the cancelled
-//     request, and the user saw "Google Sign In Failed".
+//  The original interceptor fired window.location.href = "/login" on ANY
+//  401. This caused a cascade:
+//    1. Render's free backend sleeps after 15 min → wakes with a new JWT
+//       secret → your stored JWT is now invalid → next API call returns 401.
+//    2. The interceptor fires and redirects to /login.
+//    3. Render's static CDN has no /login file — it's a React SPA route,
+//       not a physical file. Render returned a real 404.
+//    4. The page unloaded. Any in-flight Google auth request was cancelled.
+//    5. The user saw "Google sign-in failed" AND a broken page.
+//    6. Clearing localStorage removed the stale JWT → no 401 on next visit
+//       → interceptor never fires → Google works again → repeat next day.
 //
-//  2. Auth endpoints (/api/auth/**) should NEVER trigger a redirect on 401
-//     — a wrong password legitimately returns 401 and must be handled by
-//     the form's own catch block, not by a global redirect.
+//  FIX 1: Only redirect on 401 for NON-AUTH endpoints.
+//    Auth endpoints (/api/auth/**) legitimately return 401 for wrong
+//    credentials. These must be handled by the form's own error handling,
+//    not by a global redirect.
 //
-//  FIX: Only redirect on 401 for NON-AUTH routes, and use React Router's
-//  navigate instead of window.location.href so in-flight requests are not
-//  cancelled by a full page reload. We also skip the redirect entirely if
-//  an auth-route request returns 401 (wrong password, expired Google token,
-//  etc.) so those errors surface correctly in the UI.
+//  FIX 2: Redirect to "/" (the landing page / root) not "/login".
+//    "/" always exists as a physical file (index.html) on any static host.
+//    "/login" does NOT exist as a file — it's a client-side route that
+//    requires the SPA rewrite rule in render.yaml to work. Even with
+//    render.yaml deployed, redirecting to "/" is safer because the landing
+//    page is the canonical public entry point for unauthenticated users,
+//    and it always resolves correctly on every host (Render, Vercel, Netlify,
+//    S3, etc.) without requiring any special routing config.
+//
+//  NOTE: render.yaml now includes the SPA rewrite rule, so /login will
+//  also work after that is deployed. But "/" is still the better redirect
+//  target for a 401 because it's the natural "you got logged out" landing.
 // ─────────────────────────────────────────
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    const status = error.response?.status;
+    const status     = error.response?.status;
     const requestUrl = error.config?.url ?? "";
 
     // Only auto-logout on 401 from protected (non-auth) endpoints.
@@ -63,10 +76,17 @@ api.interceptors.response.use(
       localStorage.removeItem("convexa_token");
       localStorage.removeItem("convexa_user");
 
-      // Use replace so the protected URL is not left in history.
-      // Check we are not already on the login page to avoid redirect loops.
-      if (!window.location.pathname.startsWith("/login")) {
-        window.location.replace("/login");
+      // Redirect to root ("/") not "/login":
+      //   - "/" is always a real file (index.html) on every static host.
+      //   - "/login" is a React Router route — it requires the SPA rewrite
+      //     rule to be configured in render.yaml. If that rule isn't in
+      //     place yet, /login returns a 404 and breaks the page entirely.
+      //   - Redirecting to "/" is safe in all environments and shows the
+      //     user the landing page, from which they can click "Log in".
+      if (!window.location.pathname.startsWith("/")) {
+        window.location.replace("/");
+      } else if (window.location.pathname !== "/") {
+        window.location.replace("/");
       }
     }
 
@@ -81,28 +101,15 @@ api.interceptors.response.use(
 /**
  * Persists the JWT and user object returned by the backend.
  *
- * BUG FIX: The previous version wrote to convexa_user TWICE.
- * The first write was conditional on authResponse.user existing.
- * The second write was ALWAYS executed, using a fallback object built from
- * root-level fields (id, name, email, role). Because AuthResponse.java
- * returns flat fields (not a nested .user object), authResponse.user was
- * always undefined — so write #1 was always skipped, and write #2 always
- * ran. But write #2 used `authResponse.user ?? { id, name, email, role }`,
- * meaning when authResponse.user IS defined (nested), it would use that
- * object, and when it is NOT defined it would use the root-level fields.
- * The actual bug: when authResponse.user IS undefined, the ?? branch runs
- * and correctly uses root-level fields — but write #2 ran regardless,
- * OVERWRITING the correct value from write #1 in the case where
- * authResponse.user WAS defined. This is now a single, unified write.
+ * AuthResponse.java returns flat fields (id, name, email, role, token).
+ * This single write handles both flat (current backend) and nested
+ * (.user key) response shapes.
  */
 export const storeSession = (authResponse) => {
   if (authResponse.token) {
     localStorage.setItem("convexa_token", authResponse.token);
   }
 
-  // AuthResponse.java returns flat fields (id, name, email, role, token).
-  // Some future backends may wrap them under a .user key instead.
-  // This single write handles both shapes correctly with no double-write.
   const user = authResponse.user ?? {
     id:    authResponse.id,
     name:  authResponse.name,
@@ -137,23 +144,9 @@ export const isAuthenticated = () => Boolean(getToken());
 //  POST /api/auth/google
 // ─────────────────────────────────────────
 export const authAPI = {
-  /**
-   * Register a new user
-   * @param {{ name: string, email: string, password: string }} data
-   */
-  register: (data) => api.post("/api/auth/register", data),
-
-  /**
-   * Login an existing user
-   * @param {{ email: string, password: string }} data
-   */
-  login: (data) => api.post("/api/auth/login", data),
-
-  /**
-   * Authenticate with a Google ID token.
-   * @param {{ credential: string }} data
-   */
-  googleLogin: (data) => api.post("/api/auth/google", data),
+  register:    (data) => api.post("/api/auth/register", data),
+  login:       (data) => api.post("/api/auth/login",    data),
+  googleLogin: (data) => api.post("/api/auth/google",   data),
 };
 
 export default api;

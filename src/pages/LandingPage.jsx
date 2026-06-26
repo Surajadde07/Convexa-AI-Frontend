@@ -700,7 +700,7 @@ function Hero() {
                     </div>
 
                     {/* RIGHT — DASHBOARD PREVIEW */}
-                    <div className="hero-right" style={{ position: 'relative', animation: 'scaleIn 1s ease both', animationDelay: '0.2s', overflow: 'hidden', padding: '30px 30px 30px 30px' }}>
+                    <div className="hero-right" style={{ position: 'relative', animation: 'scaleIn 1s ease both', animationDelay: '0.2s', overflow: 'visible', padding: '30px 30px 30px 30px' }}>
 
                         {/* Glow behind card */}
                         <div style={{
