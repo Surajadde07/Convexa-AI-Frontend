@@ -433,20 +433,50 @@ function Navbar() {
             borderBottom: scrolled || mobileOpen ? '1px solid rgba(255,255,255,0.06)' : '1px solid transparent',
         }}>
             <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 24px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 68 }}>
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        height: 68,
+                        gap: 12,
+                        minWidth: 0,
+                    }}
+                >
 
                     {/* LOGO */}
                     <Link
                         to="/"
                         onClick={close}
-                        style={{ display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none' }}
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            textDecoration: "none",
+                            minWidth: 0,
+                        }}
                     >
                         <img
                             src={logo}
                             alt="Convexa AI"
-                            style={{ height: 50, width: 'auto', objectFit: 'contain' }}
+                            style={{
+                                height: "clamp(34px, 5vw, 48px)",
+                                width: "auto",
+                                objectFit: "contain",
+                                flexShrink: 0,
+                            }}
                         />
-                        <span className="font-display" style={{ fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: '-0.02em' }}>
+                        <span
+                            className="font-display"
+                            style={{
+                                fontSize: "clamp(18px, 2vw, 22px)",
+                                fontWeight: 800,
+                                color: "#fff",
+                                letterSpacing: "-0.02em",
+                                whiteSpace: "nowrap",
+                                flexShrink: 0,
+                            }}
+                        >
                             Convexa <span className="gradient-text">AI</span>
                         </span>
                     </Link>
@@ -494,7 +524,6 @@ function Navbar() {
                     <button
                         className="hamburger-btn"
                         onClick={() => setMobileOpen(o => !o)}
-                        aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
                         aria-expanded={mobileOpen}
                         style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
                     >
@@ -575,7 +604,7 @@ function Navbar() {
 ───────────────────────────────────────── */
 function Hero() {
     return (
-        <section style={{ position: 'relative', minHeight: '100vh', display: 'flex', alignItems: 'center', overflow: 'hidden', paddingTop: 100 }}>
+        <section id="about" style={{ position: 'relative', minHeight: '100vh', display: 'flex', alignItems: 'center', overflow: 'hidden', paddingTop: 100 }}>
 
             {/* Grid pattern */}
             <div style={{
@@ -1441,7 +1470,7 @@ function Footer() {
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: 12,
-                                    
+
                                 }}
                             >
                                 <img

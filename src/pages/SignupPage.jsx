@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AuthLayout from "../components/AuthLayout";
 import GoogleAuthButton from "../components/GoogleAuthButton";
@@ -48,16 +48,24 @@ function PasswordStrengthBar({ password }) {
 //  INPUT
 // ─────────────────────────────────────────
 function AuthInput({ label, type = "text", value, onChange, placeholder, error, icon, rightElement, hint }) {
+  const [focused, setFocused] = useState(false);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-      <label style={{ fontSize: 13, fontWeight: 500, color: "rgba(226,232,240,0.65)", letterSpacing: "0.02em" }}>
+      <label style={{
+        fontSize: 13, fontWeight: 600,
+        color: focused ? "rgba(226,232,240,0.85)" : "rgba(226,232,240,0.6)",
+        letterSpacing: "0.02em",
+        transition: "color 0.2s",
+      }}>
         {label}
       </label>
       <div style={{ position: "relative" }}>
         {icon && (
           <span style={{
             position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)",
-            fontSize: 15, opacity: 0.4, pointerEvents: "none", zIndex: 1,
+            fontSize: 15, opacity: focused ? 0.65 : 0.4,
+            pointerEvents: "none", zIndex: 1,
+            transition: "opacity 0.2s",
           }}>{icon}</span>
         )}
         <input
@@ -65,13 +73,29 @@ function AuthInput({ label, type = "text", value, onChange, placeholder, error, 
           value={value}
           onChange={onChange}
           placeholder={placeholder}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           className={`input-field${error ? " error" : ""}`}
-          style={{ paddingLeft: icon ? 42 : 16, paddingRight: rightElement ? 48 : 16 }}
+          style={{
+            paddingLeft: icon ? 42 : 16,
+            paddingRight: rightElement ? 48 : 16,
+            width: "100%",
+            boxSizing: "border-box",
+            minHeight: 48,
+            outline: focused && !error
+              ? "2px solid rgba(124,58,237,0.5)"
+              : error
+                ? "2px solid rgba(239,68,68,0.4)"
+                : "2px solid transparent",
+            outlineOffset: "2px",
+          }}
         />
         {rightElement && (
           <span style={{
             position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)",
             cursor: "pointer", zIndex: 1,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            minWidth: 32, minHeight: 32,
           }}>{rightElement}</span>
         )}
       </div>
@@ -105,9 +129,10 @@ function LeftPanel() {
       display: "flex",
       flexDirection: "column",
       justifyContent: "center",
-      padding: "60px 56px",
+      padding: "clamp(32px, 5vw, 60px) clamp(28px, 4.5vw, 56px)",
       position: "relative",
       overflow: "hidden",
+      minWidth: 0,
     }}>
       {/* Logo */}
       <div className="animate-fade-right delay-100" style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 44 }}>
@@ -276,7 +301,7 @@ function SignupForm() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
 
       {apiError && (
         <div style={{
@@ -433,16 +458,19 @@ function SignupForm() {
         disabled={loading || success}
         className="btn-glow"
         style={{
-          width: "100%", padding: "14px", borderRadius: 14,
-          fontSize: 16, fontWeight: 700, cursor: loading || success ? "not-allowed" : "pointer",
+          width: "100%", padding: "15px", borderRadius: 14, minHeight: 52,
+          fontSize: 15, fontWeight: 700, cursor: loading || success ? "not-allowed" : "pointer",
           border: "none", color: "#fff",
           background: loading || success
             ? "rgba(124,58,237,0.5)"
             : "linear-gradient(135deg, #7c3aed, #4f46e5)",
-          boxShadow: loading || success ? "none" : "0 10px 40px rgba(124,58,237,0.4)",
-          transition: "all 0.3s ease",
+          boxShadow: loading || success ? "none" : "0 8px 32px rgba(124,58,237,0.4)",
+          transition: "all 0.2s ease",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          letterSpacing: "-0.01em",
         }}
+        onMouseEnter={(e) => { if (!loading && !success) { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 12px 40px rgba(124,58,237,0.55)"; } }}
+        onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = loading || success ? "none" : "0 8px 32px rgba(124,58,237,0.4)"; }}
       >
         {loading ? (
           <>
@@ -487,8 +515,9 @@ function RightPanel() {
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      padding: "60px 48px",
+      padding: "clamp(32px, 5vw, 60px) clamp(20px, 4vw, 48px)",
       position: "relative",
+      minWidth: 0,
     }}>
       <div style={{
         position: "absolute", left: 0, top: "10%", height: "80%", width: 1,
@@ -498,9 +527,10 @@ function RightPanel() {
       <div style={{ width: "100%", maxWidth: 440 }}>
         <div className="glass-strong gradient-border animate-fade-up" style={{
           borderRadius: 28,
-          padding: "40px 36px",
+          padding: "clamp(28px, 4vw, 40px) clamp(22px, 3.5vw, 36px)",
+          boxShadow: "0 32px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05)",
         }}>
-          <div style={{ marginBottom: 30 }}>
+          <div style={{ marginBottom: 28 }}>
             <div style={{
               display: "inline-flex", alignItems: "center", gap: 6,
               background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)",
@@ -513,7 +543,7 @@ function RightPanel() {
             </div>
 
             <h2 className="font-display" style={{
-              fontSize: 26, fontWeight: 800, color: "#fff",
+              fontSize: "clamp(22px, 2.5vw, 26px)", fontWeight: 800, color: "#fff",
               letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8,
             }}>
               Create your account
@@ -542,21 +572,51 @@ function RightPanel() {
 // ─────────────────────────────────────────
 function MobileSignup() {
   return (
-    <div style={{ width: "100%", padding: "40px 24px", display: "flex", flexDirection: "column", alignItems: "center" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 36 }}>
-        <img src={logo} alt="Convexa AI" style={{ height: 40, width: "auto" }} />
-        <span className="font-display" style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>Convexa AI</span>
+    <div style={{
+      width: "100%",
+      minHeight: "100vh",
+      paddingTop: "max(env(safe-area-inset-top), 32px)",
+      paddingBottom: 40,
+      paddingLeft: 16,
+      paddingRight: 16,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      boxSizing: "border-box",
+      overflowX: "hidden",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28 }}>
+        <img src={logo} alt="Convexa AI" style={{ height: 38, width: "auto" }} />
+        <span className="font-display" style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>Convexa AI</span>
       </div>
-      <div style={{ width: "100%", maxWidth: 400 }}>
-        <div className="glass-strong gradient-border" style={{ borderRadius: 24, padding: "36px 28px" }}>
-          <h2 className="font-display" style={{ fontSize: 24, fontWeight: 800, color: "#fff", marginBottom: 6, letterSpacing: "-0.03em" }}>
+      <div style={{ width: "100%", maxWidth: 440 }}>
+        <div className="glass-strong gradient-border" style={{
+          borderRadius: 24,
+          padding: "clamp(24px, 6vw, 36px) clamp(18px, 5vw, 28px)",
+          boxShadow: "0 24px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05)",
+        }}>
+          <div style={{
+            display: "inline-flex", alignItems: "center", gap: 6,
+            background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)",
+            borderRadius: 40, padding: "4px 12px", marginBottom: 14,
+          }}>
+            <span style={{ fontSize: 10 }}>🚀</span>
+            <span style={{ fontSize: 11, color: "#4ade80", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" }}>Free to start</span>
+          </div>
+          <h2 className="font-display" style={{ fontSize: "clamp(22px, 6vw, 24px)", fontWeight: 800, color: "#fff", marginBottom: 6, letterSpacing: "-0.03em" }}>
             Create account
           </h2>
-          <p style={{ fontSize: 13, color: "rgba(226,232,240,0.4)", marginBottom: 28 }}>
+          <p style={{ fontSize: 13, color: "rgba(226,232,240,0.4)", marginBottom: 24, lineHeight: 1.6 }}>
             Start your free Convexa AI workspace
           </p>
           <SignupForm />
         </div>
+        <p style={{
+          textAlign: "center", fontSize: 12, color: "rgba(226,232,240,0.2)",
+          marginTop: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+        }}>
+          <span>🔒</span> Your data is encrypted and never sold
+        </p>
       </div>
     </div>
   );
@@ -570,16 +630,18 @@ export default function SignupPage() {
     typeof window !== "undefined" && window.innerWidth < 900
   );
 
-  if (typeof window !== "undefined") {
-    window.addEventListener("resize", () => setIsMobile(window.innerWidth < 900), { passive: true });
-  }
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 900);
+    window.addEventListener("resize", handleResize, { passive: true });
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   return (
     <AuthLayout>
       {isMobile ? (
         <MobileSignup />
       ) : (
-        <div style={{ display: "flex", width: "100%", minHeight: "100vh" }}>
+        <div style={{ display: "flex", width: "100%", minHeight: "100vh", overflowX: "hidden" }}>
           <LeftPanel />
           <RightPanel />
         </div>
