@@ -410,12 +410,12 @@ export default function CallDetailsPage() {
                         </span>
                     </Link>
 
-                    <div className="flex items-center gap-2 text-sm text-slate-500">
+                    <div className="hidden sm:flex items-center gap-2 text-sm text-slate-500 min-w-0 flex-1">
                         <Link to="/dashboard" className="hover:text-violet-400 transition-colors">Dashboard</Link>
                         <span>/</span>
                         <Link to="/history" className="hover:text-violet-400 transition-colors">History</Link>
                         <span>/</span>
-                        <span className="text-slate-300 truncate max-w-40">{call.fileName}</span>
+                        <span className="text-slate-300 truncate max-w-[120px] sm:max-w-[160px] md:max-w-xs">{call.fileName}</span>
                     </div>
 
                     <div className="ml-auto flex items-center gap-3">
@@ -499,16 +499,18 @@ export default function CallDetailsPage() {
                 />
 
                 {/* ── TABS ── */}
-                <div className="flex flex-wrap gap-1 p-1 rounded-2xl border border-white/8 bg-white/3 w-fit">
-                    {TABS.map(tab => (
-                        <button key={tab.id} onClick={() => handleTabChange(tab.id)}
-                            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all
-                                ${activeTab === tab.id
-                                    ? "bg-white/12 text-white shadow"
-                                    : "text-slate-400 hover:text-white hover:bg-white/5"}`}>
-                            {tab.label}
-                        </button>
-                    ))}
+                <div className="overflow-x-auto pb-1 -mb-1">
+                    <div className="flex gap-1 p-1 rounded-2xl border border-white/8 bg-white/3 w-fit min-w-full sm:min-w-0">
+                        {TABS.map(tab => (
+                            <button key={tab.id} onClick={() => handleTabChange(tab.id)}
+                                className={`px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap flex-shrink-0
+                                    ${activeTab === tab.id
+                                        ? "bg-white/12 text-white shadow"
+                                        : "text-slate-400 hover:text-white hover:bg-white/5"}`}>
+                                {tab.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
                 {/* ── OVERVIEW TAB ── */}
@@ -683,7 +685,7 @@ export default function CallDetailsPage() {
                                 <div>
                                     <p className="text-2xl font-black text-white">{call.overallScore} / 100</p>
                                     <p className="text-slate-400 text-sm mt-1">Overall Conversation Quality</p>
-                                    <div className="w-64 h-2 rounded-full mt-3" style={{ background: "rgba(255,255,255,0.1)" }}>
+                                    <div className="w-full max-w-xs h-2 rounded-full mt-3" style={{ background: "rgba(255,255,255,0.1)" }}>
                                         <div className="h-2 rounded-full bg-gradient-to-r from-violet-500 to-blue-500 transition-all duration-700"
                                             style={{ width: `${call.overallScore}%` }} />
                                     </div>
@@ -724,7 +726,7 @@ export default function CallDetailsPage() {
                                     { label: "Customer Satisfaction", val: call.customerSatisfaction, color: "#f59e0b" },
                                 ].map(({ label, val, color }) => (
                                     <div key={label} className="flex items-center gap-3">
-                                        <span className="w-40 text-xs text-slate-400 text-right flex-shrink-0">{label}</span>
+                                        <span className="w-28 sm:w-40 text-xs text-slate-400 text-right flex-shrink-0">{label}</span>
                                         <div className="flex-1 h-2 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }}>
                                             <div className="h-2 rounded-full transition-all duration-700"
                                                 style={{ width: `${val || 0}%`, background: color }} />

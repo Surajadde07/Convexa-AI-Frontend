@@ -237,6 +237,32 @@ const globalStyles = `
   /* ── Responsive utilities ── */
   .hidden-mobile { display: flex; }
 
+  /* Ensure no element ever causes horizontal overflow */
+  * { max-width: 100%; }
+  img, video, svg { max-width: 100%; height: auto; }
+
+  @media (max-width: 479px) {
+    /* XS: tiny phones */
+    .hero-stats {
+      gap: 16px !important;
+      flex-wrap: wrap !important;
+    }
+    .hero-stats > div {
+      min-width: 80px;
+    }
+    /* Analytics stat row: 2 cols on XS */
+    .analytics-stat-row {
+      grid-template-columns: repeat(2, 1fr) !important;
+    }
+    .analytics-inner-grid {
+      grid-template-columns: 1fr !important;
+    }
+    /* Pricing: ensure cards don't overflow */
+    .pricing-grid {
+      grid-template-columns: 1fr !important;
+    }
+  }
+
   @media (max-width: 767px) {
     .hidden-mobile { display: none !important; }
     .hamburger-btn { display: flex !important; }
@@ -260,6 +286,10 @@ const globalStyles = `
     }
     .analytics-inner-grid {
       grid-template-columns: 1fr !important;
+    }
+    /* Analytics stat value: scale down on mobile */
+    .analytics-stat-val {
+      font-size: 22px !important;
     }
 
     /* WhyConvexa: stack */
@@ -286,8 +316,11 @@ const globalStyles = `
 
     /* CTA inner padding */
     .cta-inner {
-      padding: 48px 24px !important;
+      padding: 40px 20px !important;
       border-radius: 20px !important;
+    }
+    .cta-inner p {
+      font-size: 15px !important;
     }
 
     /* Navbar CTA buttons: hide "Log in" on very small screens to save space */
@@ -296,12 +329,50 @@ const globalStyles = `
     }
     /* Analytics dashboard: reduce padding on mobile */
     .analytics-dashboard-inner {
-      padding: 16px !important;
+      padding: 14px !important;
     }
 
     /* Ticker: ensure it never causes horizontal scroll */
     .ticker-wrap {
       overflow: hidden !important;
+    }
+
+    /* Section padding: reduce on mobile */
+    .section-pad-lg {
+      padding-top: 72px !important;
+      padding-bottom: 72px !important;
+    }
+
+    /* Floating badges: hide on mobile to prevent overflow */
+    .hero-float-badge {
+      display: none !important;
+    }
+
+    /* HowItWorks: reduce card padding */
+    .hiw-card {
+      padding: 28px 20px !important;
+    }
+
+    /* Feature cards: ensure minimum 1 col */
+    .features-grid {
+      grid-template-columns: 1fr !important;
+    }
+
+    /* Testimonials: stack */
+    .testimonials-grid {
+      grid-template-columns: 1fr !important;
+    }
+
+    /* Problem grid: stack */
+    .problem-grid {
+      grid-template-columns: 1fr !important;
+    }
+  }
+
+  @media (min-width: 480px) and (max-width: 767px) {
+    /* Small mobile landscape / large phone: 2-col grids where safe */
+    .problem-grid {
+      grid-template-columns: repeat(2, 1fr) !important;
     }
   }
 
@@ -328,17 +399,27 @@ const globalStyles = `
       gap: 48px !important;
     }
 
-    /* Pricing: stack to 1 col on tablet */
+    /* Pricing: 1 col centered on tablet */
     .pricing-grid {
-      grid-template-columns: 1fr !important;
-      max-width: 480px !important;
-      margin: 0 auto !important;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)) !important;
     }
 
     /* Footer: 2 cols */
     .footer-grid {
       grid-template-columns: 1fr 1fr !important;
       gap: 32px !important;
+    }
+
+    /* Analytics dashboard inner: stagger for tablet */
+    .analytics-inner-grid {
+      grid-template-columns: 1fr !important;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    /* Restore full pricing grid on desktop */
+    .pricing-grid {
+      grid-template-columns: repeat(3, 1fr) !important;
     }
   }
 `;
@@ -624,8 +705,8 @@ function Hero() {
                 filter: 'blur(40px)', zIndex: 0,
             }} />
 
-            <div style={{ maxWidth: 1280, margin: '0 auto', padding: '80px 24px', position: 'relative', zIndex: 1, width: '100%' }}>
-                <div className="hero-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 64, alignItems: 'center' }}>
+            <div style={{ maxWidth: 1280, margin: '0 auto', padding: 'clamp(40px,8vw,80px) clamp(16px,4vw,24px)', position: 'relative', zIndex: 1, width: '100%', boxSizing: 'border-box' }}>
+                <div className="hero-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'clamp(32px,5vw,64px)', alignItems: 'center' }}>
 
                     {/* LEFT */}
                     <div style={{ animation: 'fadeUp 0.8s ease both' }}>
@@ -807,7 +888,7 @@ function Hero() {
                         </div>
 
                         {/* Floating badges */}
-                        <div className="animate-float" style={{
+                        <div className="animate-float hero-float-badge" style={{
                             position: 'absolute', top: 0, right: 0, zIndex: 2,
                             padding: '10px 16px', borderRadius: 12,
                             background: 'rgba(34,197,94,0.12)', backdropFilter: 'blur(16px)',
@@ -815,7 +896,7 @@ function Hero() {
                         }}>
                             <div style={{ fontSize: 11, fontWeight: 700, color: '#4ade80' }}>↑ 24% CSAT this week</div>
                         </div>
-                        <div className="animate-float2" style={{
+                        <div className="animate-float2 hero-float-badge" style={{
                             position: 'absolute', bottom: 30, left: 0, zIndex: 2,
                             padding: '10px 16px', borderRadius: 12,
                             background: 'rgba(99,102,241,0.12)', backdropFilter: 'blur(16px)',
@@ -872,7 +953,7 @@ function Problem() {
     ];
 
     return (
-        <section id="problem" style={{ padding: '120px 24px', position: 'relative', zIndex: 1 }} className="section-reveal">
+        <section id="problem" style={{ padding: 'clamp(72px,10vw,120px) clamp(16px,4vw,24px)', position: 'relative', zIndex: 1 }} className="section-reveal">
             <div style={{ maxWidth: 1280, margin: '0 auto' }}>
 
                 <div style={{ maxWidth: 640, marginBottom: 64 }}>
@@ -892,7 +973,7 @@ function Problem() {
                     </p>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px,1fr))', gap: 20 }}>
+                <div className="problem-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px,1fr))', gap: 20 }}>
                     {problems.map((p, i) => (
                         <div key={i} className="card-hover gradient-border" style={{
                             padding: '28px 24px', borderRadius: 20,
@@ -933,7 +1014,7 @@ function HowItWorks() {
         },
     ];
     return (
-        <section id="how-it-works" style={{ padding: '120px 24px', position: 'relative', zIndex: 1 }} className="section-reveal">
+        <section id="how-it-works" style={{ padding: 'clamp(72px,10vw,120px) clamp(16px,4vw,24px)', position: 'relative', zIndex: 1 }} className="section-reveal">
             <div style={{ maxWidth: 1280, margin: '0 auto' }}>
 
                 <div style={{ textAlign: 'center', marginBottom: 80 }}>
@@ -1004,7 +1085,7 @@ function Features() {
     ];
 
     return (
-        <section id="features" style={{ padding: '120px 24px', position: 'relative', zIndex: 1 }} className="section-reveal">
+        <section id="features" style={{ padding: 'clamp(72px,10vw,120px) clamp(16px,4vw,24px)', position: 'relative', zIndex: 1 }} className="section-reveal">
             <div style={{ maxWidth: 1280, margin: '0 auto' }}>
 
                 <div style={{ textAlign: 'center', marginBottom: 80 }}>
@@ -1053,7 +1134,7 @@ function Features() {
 ───────────────────────────────────────── */
 function AnalyticsShowcase() {
     return (
-        <section style={{ padding: '120px 24px', position: 'relative', zIndex: 1 }} className="section-reveal">
+        <section style={{ padding: 'clamp(72px,10vw,120px) clamp(16px,4vw,24px)', position: 'relative', zIndex: 1 }} className="section-reveal">
             <div style={{ maxWidth: 1280, margin: '0 auto' }}>
 
                 <div style={{ textAlign: 'center', marginBottom: 64 }}>
@@ -1101,13 +1182,13 @@ function AnalyticsShowcase() {
                                     background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
                                 }}>
                                     <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>{s.label}</div>
-                                    <div className="font-display" style={{ fontSize: 28, fontWeight: 800, color: '#fff' }}>{s.val}</div>
+                                    <div className="font-display analytics-stat-val" style={{ fontSize: 28, fontWeight: 800, color: '#fff' }}>{s.val}</div>
                                     <div style={{ fontSize: 12, color: '#4ade80', fontWeight: 600, marginTop: 4 }}>{s.delta} this week</div>
                                 </div>
                             ))}
                         </div>
 
-                        <div className="analytics-inner-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20 }}>
+                        <div className="analytics-inner-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2fr) minmax(0,1fr)', gap: 20 }}>
 
                             {/* Keyword bars */}
                             <div style={{ padding: '24px', borderRadius: 20, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
@@ -1186,7 +1267,7 @@ function WhyConvexa() {
     ];
 
     return (
-        <section style={{ padding: '120px 24px', position: 'relative', zIndex: 1 }} className="section-reveal">
+        <section style={{ padding: 'clamp(72px,10vw,120px) clamp(16px,4vw,24px)', position: 'relative', zIndex: 1 }} className="section-reveal">
             <div style={{ maxWidth: 1280, margin: '0 auto' }}>
 
                 <div className="why-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 80, alignItems: 'center' }}>
@@ -1254,7 +1335,7 @@ function Testimonials() {
     ];
 
     return (
-        <section style={{ padding: '120px 24px', position: 'relative', zIndex: 1 }} className="section-reveal">
+        <section style={{ padding: 'clamp(72px,10vw,120px) clamp(16px,4vw,24px)', position: 'relative', zIndex: 1 }} className="section-reveal">
             <div style={{ maxWidth: 1280, margin: '0 auto' }}>
 
                 <div style={{ textAlign: 'center', marginBottom: 72 }}>
@@ -1315,7 +1396,7 @@ function Pricing() {
     ];
 
     return (
-        <section id="pricing" style={{ padding: '120px 24px', position: 'relative', zIndex: 1 }} className="section-reveal">
+        <section id="pricing" style={{ padding: 'clamp(72px,10vw,120px) clamp(16px,4vw,24px)', position: 'relative', zIndex: 1 }} className="section-reveal">
             <div style={{ maxWidth: 1200, margin: '0 auto' }}>
 
                 <div style={{ textAlign: 'center', marginBottom: 72 }}>
@@ -1394,7 +1475,7 @@ function Pricing() {
 ───────────────────────────────────────── */
 function CTA() {
     return (
-        <section style={{ padding: '80px 24px 120px', position: 'relative', zIndex: 1 }} className="section-reveal">
+        <section style={{ padding: 'clamp(48px,8vw,80px) clamp(16px,4vw,24px) clamp(72px,10vw,120px)', position: 'relative', zIndex: 1 }} className="section-reveal">
             <div style={{ maxWidth: 900, margin: '0 auto' }}>
                 <div className="cta-inner" style={{
                     borderRadius: 32, padding: '80px 60px', textAlign: 'center',
@@ -1405,7 +1486,7 @@ function CTA() {
                     {/* Glow */}
                     <div style={{
                         position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
-                        width: 500, height: 300, borderRadius: '50%',
+                        width: 'min(500px, 90%)', height: 300, borderRadius: '50%',
                         background: 'radial-gradient(circle, rgba(124,58,237,0.3), transparent 70%)',
                         filter: 'blur(60px)', pointerEvents: 'none',
                     }} />
@@ -1425,8 +1506,8 @@ function CTA() {
                         <h2 className="font-display" style={{ fontSize: 'clamp(30px,4vw,56px)', fontWeight: 800, color: '#fff', letterSpacing: '-0.03em', marginBottom: 20, lineHeight: 1.1 }}>
                             Ready to decode<br />every conversation?
                         </h2>
-                        <p style={{ fontSize: 18, color: 'rgba(226,232,240,0.65)', marginBottom: 40, lineHeight: 1.7 }}>
-                            Join hundreds of teams turning call recordings into business intelligence.<br />
+                        <p style={{ fontSize: 'clamp(15px,2vw,18px)', color: 'rgba(226,232,240,0.65)', marginBottom: 40, lineHeight: 1.7, maxWidth: '52ch', margin: '0 auto 40px' }}>
+                            Join hundreds of teams turning call recordings into business intelligence.
                             Free to start — no credit card required.
                         </p>
                         <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
