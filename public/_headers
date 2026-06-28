@@ -1,27 +1,3 @@
-# public/_headers — place this inside your frontend's /public folder
-# Vite copies everything in /public to /dist at build time.
-# Render reads _headers from the published directory root.
-#
-# This file is a BACKUP for the header config in render.yaml.
-# Both set the same headers — having both ensures the headers apply
-# regardless of which Render configuration mechanism takes precedence
-# for your service type.
-#
-# Cross-Origin-Opener-Policy: same-origin-allow-popups
-#   → Allows Google Identity Services to postMessage credentials back
-#     to your page from its cross-origin popup/iframe.
-#     Without this, Render's default "same-origin" COOP silently drops
-#     the postMessage and Google sign-in always fails.
-#
-# Cross-Origin-Embedder-Policy: unsafe-none
-#   → Disables COEP which Render may also set. COEP: require-corp would
-#     block the GIS iframe from loading at all on some browsers.
-#
-# Cache-Control: no-store
-#   → Prevents the browser from serving a stale page from bfcache
-#     after logout. Without this, pressing Back after sign-out restores
-#     the authenticated page from cache, bypassing ProtectedRoute.
-
 /*
   Cross-Origin-Opener-Policy: same-origin-allow-popups
   Cross-Origin-Embedder-Policy: unsafe-none
