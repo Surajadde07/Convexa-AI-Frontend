@@ -40,7 +40,7 @@ export function loadGoogleScript() {
  * Prepares GIS for use.
  *
  * activeCallback is ALWAYS updated before the initialized guard so that
- * remounted components always get their credential responses (Fix 3).
+ * remounted components always get their credential responses.
  *
  * @param {(credentialResponse: { credential: string }) => void} onCredential
  */
@@ -59,14 +59,34 @@ export async function initializeGoogleAuth(onCredential) {
     },
     auto_select: false,
 
+    // Disables FedCM for the One Tap prompt.
     use_fedcm_for_prompt: false,
-    use_fedcm_for_button: false, 
+
+    // FIX: Disables FedCM for the Sign In button click as well.
+    //
+    // Without this, Chrome/Edge/Brave use the FedCM API for the button,
+    // which requires the click to originate inside Google's own iframe.
+    // Because our invisible GIS iframe can be fractionally misaligned with
+    // our custom button face, Chrome logs:
+    //   "Opening multiple popups was blocked due to lack of user activation."
+    // and silently swallows the click — the button appears to do nothing.
+    //
+    // Setting this to false forces all Chromium browsers onto the classic
+    // iframe/postMessage path (the same path Firefox always uses), which
+    // our COOP headers (same-origin-allow-popups) already support.
+    use_fedcm_for_button: false,
   });
 }
 
 /**
  * Renders the official Google Sign-In button.
- * This is the only rendering path — no custom button, no One Tap prompt.
+ *
+ * FIX: width is now read from the actual container element instead of being
+ * hardcoded to 340. A hardcoded width caused the GIS iframe to be slightly
+ * narrower than the wrapper div on some screen sizes/zoom levels, creating
+ * a gap where clicks hit the wrapper but miss the iframe. Chrome treats
+ * those misses as "no user activation" and blocks the popup. Reading
+ * offsetWidth guarantees the iframe fills the container exactly.
  *
  * @param {string} elementId
  */
@@ -76,10 +96,14 @@ export function renderGoogleButton(elementId) {
   const el = document.getElementById(elementId);
   if (!el) return;
 
+  // Use the actual rendered width of the container so the iframe fills it
+  // exactly. Fall back to 400 if the element isn't in the layout yet.
+  const containerWidth = el.offsetWidth || 400;
+
   window.google.accounts.id.renderButton(el, {
     theme: "filled_black",
     size:  "large",
-    width: 340,
+    width: containerWidth,
     text:  "continue_with",
     shape: "rectangular",
   });

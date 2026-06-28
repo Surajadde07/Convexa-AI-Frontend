@@ -1,28 +1,3 @@
-/**
- * GoogleAuthButton.jsx
- *
- * ── REWRITE RATIONALE ─────────────────────────────────────────────────────
- *
- * The previous version rendered a CUSTOM styled <button> that, on click,
- * tried One Tap first and only rendered Google's official button as a
- * "fallback" if One Tap was suppressed. Because One Tap was reliably
- * suppressed (see googleAuth.js comments — FedCM failures on localhost),
- * the fallback fired on essentially every click, producing two visible
- * buttons stacked in the same area.
- *
- * NEW BEHAVIOUR:
- *   There is now only ONE button on the page: Google's own official
- *   button, rendered immediately on mount via renderGoogleButton(). There
- *   is no custom <button>, no onClick handler that triggers a second
- *   rendering path, and no prompt()/One Tap call anywhere. The user clicks
- *   Google's button directly; GIS invokes the registered callback in the
- *   same execution context (no popup, no postMessage, no COOP issue).
- *
- * `loading` state is now driven only by the credential-exchange request to
- * your backend (authAPI.googleLogin), not by any Google-side prompt logic,
- * since there is no longer a "show fallback" transition to track.
- */
-
 import { useState, useEffect, useId } from "react";
 import { initializeGoogleAuth, renderGoogleButton } from "../services/googleAuth";
 
@@ -64,7 +39,6 @@ export default function GoogleAuthButton({ label, onSuccess, onError, authAPI, s
     })();
 
     return () => { cancelled = true; };
-    // elementId is stable for the lifetime of this component instance
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -108,20 +82,28 @@ export default function GoogleAuthButton({ label, onSuccess, onError, authAPI, s
     >
 
       {/*
-       * ── WHY THIS PATTERN ────────────────────────────────────────────────
-       * GIS's renderButton() injects a cross-origin <iframe> (accounts.google.com).
-       * Everything inside that iframe — icon size, padding, text alignment — is
-       * controlled by Google and cannot be overridden with CSS from our page.
-       * This is why the previous wrapper approach always looked misaligned.
+       * ── FIX APPLIED HERE ────────────────────────────────────────────────
        *
-       * Solution used by Clerk, Vercel, Supabase, Notion:
-       *   1. Render the GIS iframe but make it INVISIBLE (opacity 0) and stretch
-       *      it to fill the full button area so it still receives clicks.
-       *   2. Paint our own fully-controlled custom button face on top (pointer-events none).
-       *   3. The user sees our button; their click passes through to the invisible iframe.
+       * BEFORE (broken in Chrome/Edge/Brave):
+       *   - overflow: "hidden" clipped the GIS iframe
+       *   - width: 340 hardcoded in renderGoogleButton caused the iframe to
+       *     be narrower than the container on some viewports/zoom levels
+       *   - Clicks on the gap between the iframe edge and the container edge
+       *     registered on the wrapper div, NOT on the iframe
+       *   - Chrome requires the popup to be opened from a direct click inside
+       *     the iframe (user activation); a click on the wrapper doesn't count
+       *   - Result: "Opening multiple popups was blocked due to lack of user
+       *     activation" — button silently does nothing in Chrome
        *
-       * Auth flow is 100% unchanged — GIS iframe fires the credential callback
-       * exactly as before. We only changed what the user sees.
+       * AFTER (fixed):
+       *   - overflow removed so the iframe isn't clipped
+       *   - CSS below forces the GIS iframe and its wrapper div to be 100%
+       *     wide and at least 50px tall, filling the container exactly
+       *   - Every click on our custom button face passes through to the
+       *     iframe's full surface area, satisfying Chrome's user-activation
+       *     requirement
+       *   - use_fedcm_for_button: false in googleAuth.js ensures all
+       *     Chromium browsers use the classic iframe path, not FedCM
        * ────────────────────────────────────────────────────────────────────
        */}
 
@@ -133,9 +115,9 @@ export default function GoogleAuthButton({ label, onSuccess, onError, authAPI, s
           inset: 0,
           zIndex: 2,
           opacity: 0,
-          overflow: "hidden",
+          // overflow: "hidden" intentionally removed — it was clipping the
+          // GIS iframe and causing click-miss in Chrome (see comment above)
           borderRadius: 13,
-          /* Stretch GIS's iframe to fill our button footprint */
           display: "flex",
           alignItems: "stretch",
           cursor: "pointer",
@@ -143,62 +125,27 @@ export default function GoogleAuthButton({ label, onSuccess, onError, authAPI, s
         }}
       />
 
-      {/* ── CUSTOM VISUAL BUTTON (pure UI — pointer-events none) ── */}
-      <div
-        className="gab-face"
-        aria-label={label}
-        style={{
-          position: "relative",
-          zIndex: 1,
-          width: "100%",
-          height: 50,
-          borderRadius: 13,
-          border: "1px solid rgba(255,255,255,0.13)",
-          background: "rgba(255,255,255,0.05)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 12,
-          cursor: "pointer",
-          pointerEvents: "none",          /* clicks fall through to the GIS iframe above */
-          transition: "border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
-          userSelect: "none",
-          boxSizing: "border-box",
-          overflow: "hidden",
-        }}
-      >
-        {/* Google SVG logo — official colours, perfect 20px */}
-        <svg
-          width="20" height="20" viewBox="0 0 20 20"
-          xmlns="http://www.w3.org/2000/svg"
-          aria-hidden="true"
-          style={{ flexShrink: 0, display: "block" }}
-        >
-          <path d="M19.6 10.23c0-.68-.06-1.36-.18-2H10v3.79h5.4a4.62 4.62 0 0 1-2 3.04v2.52h3.23c1.89-1.74 2.97-4.3 2.97-7.35Z" fill="#4285F4"/>
-          <path d="M10 20c2.7 0 4.97-.89 6.63-2.42l-3.23-2.52c-.9.6-2.04.96-3.4.96-2.61 0-4.82-1.76-5.61-4.13H1.06v2.6A10 10 0 0 0 10 20Z" fill="#34A853"/>
-          <path d="M4.39 11.89A6.01 6.01 0 0 1 4.08 10c0-.65.12-1.29.31-1.89V5.51H1.06A10 10 0 0 0 0 10c0 1.61.38 3.13 1.06 4.49l3.33-2.6Z" fill="#FBBC05"/>
-          <path d="M10 3.98c1.47 0 2.79.51 3.83 1.5l2.87-2.87C14.97.99 12.7 0 10 0A10 10 0 0 0 1.06 5.51l3.33 2.6C5.18 5.74 7.39 3.98 10 3.98Z" fill="#EA4335"/>
-        </svg>
-
-        {/* Button label */}
-        <span style={{
-          fontSize: 14,
-          fontWeight: 500,
-          color: "rgba(226,232,240,0.9)",
-          letterSpacing: "0.01em",
-          lineHeight: 1,
-          whiteSpace: "nowrap",
-        }}>
-          {label}
-        </span>
-      </div>
-
-      {/* ── HOVER / FOCUS INTERACTION LAYER ── */}
-      {/* A transparent div that sits between the iframe and the visual face,
-          captures mouse events and forwards visual feedback to the face via
-          CSS variables without blocking GIS clicks */}
+      {/* ── STYLES ── */}
       <style>{`
+        /*
+         * Force the iframe Google injects to fill our invisible container
+         * completely. This is the critical fix for Chrome's user-activation
+         * check — the iframe must cover every pixel the user can click.
+         */
+        #${elementId} > div,
+        #${elementId} > div > div {
+          width: 100% !important;
+          height: 100% !important;
+        }
+        #${elementId} iframe {
+          width: 100% !important;
+          height: 100% !important;
+          min-height: 50px !important;
+          margin: 0 !important;
+          display: block !important;
+        }
+
+        /* Hover / focus styles for the custom button face */
         .gab-hover-target:hover ~ .gab-face,
         .gab-hover-target:focus-visible ~ .gab-face {
           border-color: rgba(255,255,255,0.24) !important;
@@ -220,12 +167,56 @@ export default function GoogleAuthButton({ label, onSuccess, onError, authAPI, s
         }
       `}</style>
 
-      {/*
-       * Transparent interaction target — visible to keyboard/mouse, sits in
-       * front of the visual face (z-index 3) but behind the GIS iframe (z-index
-       * still 2 on pointer events). Allows CSS sibling hover selectors to
-       * animate the face without intercepting the auth click.
-       */}
+      {/* ── CUSTOM VISUAL BUTTON (pure UI — pointer-events none) ── */}
+      <div
+        className="gab-face"
+        aria-label={label}
+        style={{
+          position: "relative",
+          zIndex: 1,
+          width: "100%",
+          height: 50,
+          borderRadius: 13,
+          border: "1px solid rgba(255,255,255,0.13)",
+          background: "rgba(255,255,255,0.05)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 12,
+          cursor: "pointer",
+          pointerEvents: "none",
+          transition: "border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
+          userSelect: "none",
+          boxSizing: "border-box",
+          overflow: "hidden",
+        }}
+      >
+        {/* Google SVG logo — official colours */}
+        <svg
+          width="20" height="20" viewBox="0 0 20 20"
+          xmlns="http://www.w3.org/2000/svg"
+          aria-hidden="true"
+          style={{ flexShrink: 0, display: "block" }}
+        >
+          <path d="M19.6 10.23c0-.68-.06-1.36-.18-2H10v3.79h5.4a4.62 4.62 0 0 1-2 3.04v2.52h3.23c1.89-1.74 2.97-4.3 2.97-7.35Z" fill="#4285F4"/>
+          <path d="M10 20c2.7 0 4.97-.89 6.63-2.42l-3.23-2.52c-.9.6-2.04.96-3.4.96-2.61 0-4.82-1.76-5.61-4.13H1.06v2.6A10 10 0 0 0 10 20Z" fill="#34A853"/>
+          <path d="M4.39 11.89A6.01 6.01 0 0 1 4.08 10c0-.65.12-1.29.31-1.89V5.51H1.06A10 10 0 0 0 0 10c0 1.61.38 3.13 1.06 4.49l3.33-2.6Z" fill="#FBBC05"/>
+          <path d="M10 3.98c1.47 0 2.79.51 3.83 1.5l2.87-2.87C14.97.99 12.7 0 10 0A10 10 0 0 0 1.06 5.51l3.33 2.6C5.18 5.74 7.39 3.98 10 3.98Z" fill="#EA4335"/>
+        </svg>
+
+        <span style={{
+          fontSize: 14,
+          fontWeight: 500,
+          color: "rgba(226,232,240,0.9)",
+          letterSpacing: "0.01em",
+          lineHeight: 1,
+          whiteSpace: "nowrap",
+        }}>
+          {label}
+        </span>
+      </div>
+
       <div
         className="gab-hover-target"
         tabIndex={-1}
@@ -235,15 +226,9 @@ export default function GoogleAuthButton({ label, onSuccess, onError, authAPI, s
           zIndex: 1,
           borderRadius: 13,
           cursor: "pointer",
-          pointerEvents: "none",   /* GIS iframe (z-index 2) handles actual clicks */
+          pointerEvents: "none",
         }}
       />
-
-      {/* Re-declare visual face with className for CSS sibling targeting */}
-      {/* NOTE: the div below is purely a re-skin — the one above (z-index 1) is
-          the real visible face. We use a second approach: the face itself catches
-          hover via onMouseEnter because the GIS iframe's pointer-events prevent
-          CSS :hover on siblings from firing reliably cross-browser. */}
 
       {/* ── LOADING OVERLAY ── */}
       {loading && (
@@ -270,7 +255,7 @@ export default function GoogleAuthButton({ label, onSuccess, onError, authAPI, s
         </div>
       )}
 
-      {/* ── SKELETON (shown until GIS renders, then gone forever) ── */}
+      {/* ── SKELETON (shown until GIS renders) ── */}
       {!ready && !loading && (
         <div style={{
           position: "absolute", inset: 0, zIndex: 3,
