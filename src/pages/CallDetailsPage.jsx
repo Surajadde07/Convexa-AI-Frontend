@@ -5,6 +5,13 @@ import logo from "../assets/CONVEXA_AI_logo.png";
 import AudioPlayer from "../components/AudioPlayer.jsx";
 import { parseInsights } from "../utils/insightsFormatter.js";
 import { generateCallReport } from "../utils/generateReport.js";
+import {
+    Smile, Frown, Meh, Trophy, XCircle, RotateCcw, AlertTriangle,
+    Hourglass, Circle, Target, ClipboardList, FileText, Clock,
+    BarChart3, ArrowLeft, Phone, Lightbulb, CheckSquare, Check,
+    Flag, CheckCircle, TrendingUp, MessageSquare, CheckCircle2,
+    Zap, Brain, KeyRound, X,
+} from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UTILITIES
@@ -28,10 +35,92 @@ function parseList(str) {
 }
 
 const SENT_CONFIG = {
-    POSITIVE: { color: "#10b981", bg: "rgba(16,185,129,0.12)", border: "rgba(16,185,129,0.3)", label: "Positive", emoji: "😊" },
-    NEGATIVE: { color: "#ef4444", bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.3)", label: "Negative", emoji: "😔" },
-    NEUTRAL:  { color: "#f59e0b", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.3)", label: "Neutral",  emoji: "😐" },
+    POSITIVE: { color: "#10b981", bg: "rgba(16,185,129,0.12)", border: "rgba(16,185,129,0.3)", label: "Positive", icon: Smile },
+    NEGATIVE: { color: "#ef4444", bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.3)", label: "Negative", icon: Frown },
+    NEUTRAL:  { color: "#f59e0b", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.3)", label: "Neutral",  icon: Meh },
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPRINT 1 — new-field utilities (outcome, action items, risk flags, etc.)
+// All new backend fields are read-only additions to the Overview tab.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Parses a TEXT column that stores a JSON array (of strings OR objects).
+ * Mirrors the defensive style of parseList() above — never throws,
+ * always returns an array, so the UI can render "empty state" placeholders
+ * instead of crashing on old records that predate these columns.
+ */
+function parseJSONArray(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value; // already parsed (defensive)
+    if (typeof value !== "string") return [];
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+const OUTCOME_CONFIG = {
+    "Won":                  { color: "#10b981", bg: "rgba(16,185,129,0.14)",  border: "rgba(16,185,129,0.35)",  icon: Trophy },
+    "Lost":                 { color: "#ef4444", bg: "rgba(239,68,68,0.14)",   border: "rgba(239,68,68,0.35)",   icon: XCircle },
+    "Follow Up Required":   { color: "#f59e0b", bg: "rgba(245,158,11,0.14)",  border: "rgba(245,158,11,0.35)",  icon: RotateCcw },
+    "Escalated":            { color: "#f97316", bg: "rgba(249,115,22,0.14)", border: "rgba(249,115,22,0.35)",  icon: AlertTriangle },
+    "Pending":              { color: "#f59e0b", bg: "rgba(245,158,11,0.14)",  border: "rgba(245,158,11,0.35)",  icon: Hourglass },
+};
+const OUTCOME_FALLBACK = { color: "#94a3b8", bg: "rgba(148,163,184,0.12)", border: "rgba(148,163,184,0.3)", icon: Circle };
+
+const INTENT_CONFIG = {
+    "High":   { color: "#10b981", bg: "rgba(16,185,129,0.12)", border: "rgba(16,185,129,0.3)" },
+    "Medium": { color: "#f59e0b", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.3)" },
+    "Low":    { color: "#f97316", bg: "rgba(249,115,22,0.12)", border: "rgba(249,115,22,0.3)" },
+    "None":   { color: "#94a3b8", bg: "rgba(148,163,184,0.1)", border: "rgba(148,163,184,0.25)" },
+    "N/A":    { color: "#94a3b8", bg: "rgba(148,163,184,0.1)", border: "rgba(148,163,184,0.25)" },
+};
+const INTENT_FALLBACK = INTENT_CONFIG["N/A"];
+
+const RISK_SEVERITY_CONFIG = {
+    High:   { color: "#ef4444", bg: "rgba(239,68,68,0.1)",  border: "rgba(239,68,68,0.3)"  },
+    Medium: { color: "#f59e0b", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)" },
+    Low:    { color: "#eab308", bg: "rgba(234,179,8,0.1)",  border: "rgba(234,179,8,0.3)"  },
+};
+const RISK_SEVERITY_FALLBACK = { color: "#f59e0b", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)" };
+
+/** Premium status badge for outcomeStatus. Gracefully no-ops on missing data. */
+function OutcomeStatusBadge({ status }) {
+    if (!status) return null;
+    const cfg = OUTCOME_CONFIG[status] || OUTCOME_FALLBACK;
+    return (
+        <span className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border"
+            style={{ background: cfg.bg, color: cfg.color, borderColor: cfg.border }}>
+            <cfg.icon className="w-3.5 h-3.5" strokeWidth={2.5} />
+            {status}
+        </span>
+    );
+}
+
+/** Clean linear progress bar for AI self-reported confidence (0-100). */
+function ConfidenceBar({ confidence }) {
+    if (confidence == null) return null;
+    const pct = Math.max(0, Math.min(100, confidence));
+    const color = pct >= 80 ? "#10b981" : pct >= 50 ? "#f59e0b" : "#ef4444";
+    return (
+        <div>
+            <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5" /> AI Confidence
+                </p>
+                <span className="text-xs font-bold" style={{ color }}>{pct}%</span>
+            </div>
+            <div className="w-full h-2 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }}>
+                <div className="h-2 rounded-full transition-all duration-700"
+                    style={{ width: `${pct}%`, background: color }} />
+            </div>
+        </div>
+    );
+}
 
 function ScoreRing({ score, size = 80, stroke = 7, color = "#8b5cf6" }) {
     const r = (size - stroke) / 2;
@@ -108,7 +197,7 @@ function TimelinePanel({ timeline, loading, error, currentSec, onSeek }) {
     if (error) {
         return (
             <div className="flex items-center gap-2.5 p-4 rounded-xl border border-red-500/20 bg-red-500/8">
-                <span className="text-red-400 text-lg">⚠️</span>
+                <AlertTriangle className="text-red-400 w-5 h-5 flex-shrink-0" />
                 <div>
                     <p className="text-sm text-red-400 font-semibold">Timeline unavailable</p>
                     <p className="text-xs text-slate-500 mt-0.5">{error}</p>
@@ -120,7 +209,7 @@ function TimelinePanel({ timeline, loading, error, currentSec, onSeek }) {
     if (!timeline || timeline.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center gap-2 py-10 text-slate-500 text-sm">
-                <span className="text-3xl">📋</span>
+                <ClipboardList className="w-8 h-8" />
                 <span>No timeline generated</span>
             </div>
         );
@@ -367,7 +456,7 @@ export default function CallDetailsPage() {
             <div className="min-h-screen flex items-center justify-center text-white"
                 style={{ background: "linear-gradient(135deg, #0a0a1a 0%, #0d0b2a 40%, #0a1628 100%)" }}>
                 <div className="text-center">
-                    <div className="text-5xl mb-4">⚠️</div>
+                    <AlertTriangle className="w-12 h-12 mb-4 mx-auto text-amber-400" />
                     <p className="text-slate-300 mb-4">{error || "Call not found"}</p>
                     <button onClick={() => navigate(-1)}
                         className="px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-all">
@@ -385,10 +474,10 @@ export default function CallDetailsPage() {
     const insights   = parseInsights(call.insights);
 
     const TABS = [
-        { id: "overview",    label: "📋 Overview"   },
-        { id: "transcript",  label: "📝 Transcript"  },
-        { id: "timeline",    label: "⏱ Timeline"    },
-        { id: "scores",      label: "📊 Scores"      },
+        { id: "overview",    label: "Overview",   icon: ClipboardList },
+        { id: "transcript",  label: "Transcript", icon: FileText },
+        { id: "timeline",    label: "Timeline",   icon: Clock },
+        { id: "scores",      label: "Scores",     icon: BarChart3 },
     ];
 
     return (
@@ -446,7 +535,7 @@ export default function CallDetailsPage() {
                         <button onClick={() => navigate(-1)}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm text-slate-400
                                 hover:text-white hover:bg-white/8 border border-white/8 transition-all">
-                            ← Back
+                            <ArrowLeft className="w-3.5 h-3.5" /> Back
                         </button>
                     </div>
                 </div>
@@ -464,9 +553,9 @@ export default function CallDetailsPage() {
                                 Call Details
                             </span>
                             {call.sentiment && (
-                                <span className="text-xs font-bold px-2.5 py-1 rounded-full"
+                                <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full"
                                     style={{ background: sentCfg.bg, color: sentCfg.color, border: `1px solid ${sentCfg.border}` }}>
-                                    {sentCfg.emoji} {sentCfg.label}
+                                    <sentCfg.icon className="w-3.5 h-3.5" /> {sentCfg.label}
                                 </span>
                             )}
                         </div>
@@ -507,7 +596,10 @@ export default function CallDetailsPage() {
                                     ${activeTab === tab.id
                                         ? "bg-white/12 text-white shadow"
                                         : "text-slate-400 hover:text-white hover:bg-white/5"}`}>
-                                {tab.label}
+                                <span className="inline-flex items-center gap-1.5">
+                                    <tab.icon className="w-3.5 h-3.5" />
+                                    {tab.label}
+                                </span>
                             </button>
                         ))}
                     </div>
@@ -518,21 +610,224 @@ export default function CallDetailsPage() {
                     <div className="space-y-5">
                         {call.summary && (
                             <div className="p-5 rounded-2xl border border-violet-500/20 bg-violet-500/5">
-                                <p className="text-xs font-bold text-violet-400 uppercase tracking-wider mb-3">📋 AI Summary</p>
+                                <p className="text-xs font-bold text-violet-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                                    <ClipboardList className="w-3.5 h-3.5" /> AI Summary
+                                </p>
                                 <p className="text-sm text-slate-300 leading-relaxed">{call.summary}</p>
                             </div>
                         )}
+
+                        {/* ── DEAL INTELLIGENCE: outcome / metadata / confidence ── */}
+                        {(call.outcomeStatus || call.callType || call.buyingIntent || call.confidence != null) && (
+                            <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                                <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 flex-wrap">
+                                    {call.outcomeStatus && (
+                                        <div>
+                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Outcome</p>
+                                            <OutcomeStatusBadge status={call.outcomeStatus} />
+                                        </div>
+                                    )}
+
+                                    {(call.callType || call.buyingIntent) && (
+                                        <div className="flex items-center gap-5 flex-wrap">
+                                            {call.callType && (
+                                                <div>
+                                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                                        <Phone className="w-3.5 h-3.5" /> Call Type
+                                                    </p>
+                                                    <span className="text-sm font-semibold text-slate-200">{call.callType}</span>
+                                                </div>
+                                            )}
+                                            {call.buyingIntent && (
+                                                <div>
+                                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                                        <Lightbulb className="w-3.5 h-3.5" /> Buying Intent
+                                                    </p>
+                                                    <span className="inline-flex text-xs font-bold px-2.5 py-1 rounded-full border"
+                                                        style={{
+                                                            background: (INTENT_CONFIG[call.buyingIntent] || INTENT_FALLBACK).bg,
+                                                            color: (INTENT_CONFIG[call.buyingIntent] || INTENT_FALLBACK).color,
+                                                            borderColor: (INTENT_CONFIG[call.buyingIntent] || INTENT_FALLBACK).border,
+                                                        }}>
+                                                        {call.buyingIntent}
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {call.confidence != null && (
+                                        <div className="flex-1 min-w-[180px] sm:max-w-xs sm:ml-auto">
+                                            <ConfidenceBar confidence={call.confidence} />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ── ACTION ITEMS + RISK FLAGS ── */}
+                        {(() => {
+                            const actionItems = parseJSONArray(call.actionItems);
+                            const riskFlags   = parseJSONArray(call.riskFlags);
+                            if (actionItems.length === 0 && riskFlags.length === 0) return null;
+
+                            return (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                    {/* Action items — read-only checklist */}
+                                    {actionItems.length > 0 && (
+                                        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                                                <CheckSquare className="w-3.5 h-3.5" /> Action Items
+                                            </p>
+                                            <ul className="space-y-2.5">
+                                                {actionItems.map((item, i) => {
+                                                    const title     = typeof item === "string" ? item : item?.title;
+                                                    const completed = typeof item === "object" && !!item?.completed;
+                                                    return (
+                                                        <li key={i} className="flex items-start gap-2.5">
+                                                            <span className={`mt-0.5 w-5 h-5 rounded-md flex-shrink-0 flex items-center justify-center text-xs font-bold border
+                                                                ${completed
+                                                                    ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
+                                                                    : "bg-white/5 border-white/15 text-slate-500"}`}>
+                                                                {completed ? <Check className="w-3.5 h-3.5" /> : ""}
+                                                            </span>
+                                                            <span className={`text-sm leading-snug ${completed ? "text-slate-500 line-through" : "text-slate-300"}`}>
+                                                                {title || "—"}
+                                                            </span>
+                                                        </li>
+                                                    );
+                                                })}
+                                            </ul>
+                                        </div>
+                                    )}
+
+                                    {/* Risk flags — amber warning cards, elegant empty state */}
+                                    <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5">
+                                        <p className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                                            <Flag className="w-3.5 h-3.5" /> Risk Flags
+                                        </p>
+                                        {riskFlags.length > 0 ? (
+                                            <ul className="space-y-2.5">
+                                                {riskFlags.map((flag, i) => {
+                                                    const severity = typeof flag === "object" ? flag?.severity : null;
+                                                    const message  = typeof flag === "string" ? flag : flag?.message;
+                                                    const cfg = RISK_SEVERITY_CONFIG[severity] || RISK_SEVERITY_FALLBACK;
+                                                    return (
+                                                        <li key={i} className="flex items-start gap-2.5 p-3 rounded-xl border"
+                                                            style={{ background: cfg.bg, borderColor: cfg.border }}>
+                                                            <AlertTriangle className="mt-0.5 flex-shrink-0 w-4 h-4" style={{ color: cfg.color }} />
+                                                            <div className="min-w-0">
+                                                                {severity && (
+                                                                    <span className="block text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: cfg.color }}>
+                                                                        {severity} risk
+                                                                    </span>
+                                                                )}
+                                                                <span className="text-sm text-slate-300 leading-snug">{message || "—"}</span>
+                                                            </div>
+                                                        </li>
+                                                    );
+                                                })}
+                                            </ul>
+                                        ) : (
+                                            <div className="flex items-center gap-2.5 py-4 text-slate-500 text-sm">
+                                                <CheckCircle className="text-emerald-400 w-4 h-4" />
+                                                <span>No active risks detected.</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })()}
+
+                        {/* ── FOLLOW-UP SUGGESTIONS ── */}
+                        {(() => {
+                            const suggestions = parseJSONArray(call.followUpSuggestions);
+                            if (suggestions.length === 0) return null;
+                            return (
+                                <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5">
+                                    <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                                        <Lightbulb className="w-3.5 h-3.5" /> Follow-Up Suggestions
+                                    </p>
+                                    <div className="space-y-2.5">
+                                        {suggestions.map((s, i) => (
+                                            <div key={i} className="flex items-start gap-3 p-3.5 rounded-xl border border-blue-500/15 bg-blue-500/5">
+                                                <Lightbulb className="flex-shrink-0 mt-0.5 w-4 h-4 text-blue-400" />
+                                                <span className="text-sm text-slate-300 leading-relaxed">{s}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })()}
+
+                        {/* ── BUYING SIGNALS + OBJECTIONS ── */}
+                        {(() => {
+                            const buyingSignals = parseJSONArray(call.buyingSignals);
+                            const objections    = parseJSONArray(call.objections);
+                            if (buyingSignals.length === 0 && objections.length === 0) return null;
+
+                            return (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                    {buyingSignals.length > 0 && (
+                                        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
+                                            <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                                                <TrendingUp className="w-3.5 h-3.5" /> Buying Signals
+                                            </p>
+                                            <div className="flex flex-wrap gap-2">
+                                                {buyingSignals.map((sig, i) => (
+                                                    <span key={i}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border"
+                                                        style={{ background: "rgba(16,185,129,0.1)", borderColor: "rgba(16,185,129,0.3)", color: "#6ee7b7" }}>
+                                                        <Check className="text-emerald-400 w-3.5 h-3.5" />
+                                                        {sig}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {objections.length > 0 && (
+                                        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                                                <MessageSquare className="w-3.5 h-3.5" /> Objections
+                                            </p>
+                                            <ul className="space-y-2.5">
+                                                {objections.map((obj, i) => {
+                                                    const text     = typeof obj === "string" ? obj : obj?.objection;
+                                                    const resolved = typeof obj === "object" && !!obj?.resolved;
+                                                    return (
+                                                        <li key={i} className="flex items-start justify-between gap-3 p-3 rounded-xl border border-white/8 bg-white/4">
+                                                            <span className="text-sm text-slate-300 leading-snug min-w-0">{text || "—"}</span>
+                                                            <span className={`flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full border
+                                                                ${resolved
+                                                                    ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"
+                                                                    : "bg-red-500/15 border-red-500/30 text-red-400"}`}>
+                                                                {resolved
+                                                                    ? <><Check className="w-3 h-3" /> Resolved</>
+                                                                    : <><X className="w-3 h-3" /> Unresolved</>}
+                                                            </span>
+                                                        </li>
+                                                    );
+                                                })}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
 
                         {(strengths.length > 0 || improvements.length > 0) && (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                 {strengths.length > 0 && (
                                     <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
-                                        <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-4">✅ Strengths</p>
+                                        <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                                            <CheckCircle2 className="w-3.5 h-3.5" /> Strengths
+                                        </p>
                                         <ul className="space-y-2.5">
                                             {strengths.map((s, i) => (
                                                 <li key={i} className="flex items-start gap-2.5">
                                                     <span className="mt-0.5 w-5 h-5 rounded-full bg-emerald-500/20 flex-shrink-0
-                                                        flex items-center justify-center text-emerald-400 text-xs font-bold">✓</span>
+                                                        flex items-center justify-center text-emerald-400 text-xs font-bold"><Check className="w-3 h-3" /></span>
                                                     <span className="text-sm text-slate-300 leading-snug">{s}</span>
                                                 </li>
                                             ))}
@@ -541,7 +836,9 @@ export default function CallDetailsPage() {
                                 )}
                                 {improvements.length > 0 && (
                                     <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5">
-                                        <p className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-4">⚡ Improvements</p>
+                                        <p className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                                            <Zap className="w-3.5 h-3.5" /> Improvements
+                                        </p>
                                         <ul className="space-y-2.5">
                                             {improvements.map((s, i) => (
                                                 <li key={i} className="flex items-start gap-2.5">
@@ -558,7 +855,9 @@ export default function CallDetailsPage() {
 
                         {insights.length > 0 && (
                             <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5">
-                                <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-4">🧠 AI Insights</p>
+                                <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                                    <Brain className="w-3.5 h-3.5" /> AI Insights
+                                </p>
                                 {insights[0]?.bullets ? (
                                     <ul className="space-y-2.5">
                                         {insights[0].bullets.map((line, i) => (
@@ -591,7 +890,9 @@ export default function CallDetailsPage() {
 
                         {keywords.length > 0 && (
                             <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">🔑 Keywords</p>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                                    <KeyRound className="w-3.5 h-3.5" /> Keywords
+                                </p>
                                 <div className="flex flex-wrap gap-2">
                                     {keywords.map((kw, i) => (
                                         <span key={i}
@@ -610,7 +911,9 @@ export default function CallDetailsPage() {
                 {activeTab === "transcript" && (
                     <div className="rounded-2xl border border-white/10 bg-white/5">
                         <div className="flex items-center gap-3 px-5 pt-5 pb-3 border-b border-white/8">
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex-shrink-0">📝 Transcript</p>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex-shrink-0 flex items-center gap-1.5">
+                                <FileText className="w-3.5 h-3.5" /> Transcript
+                            </p>
                             <div className="flex-1 relative">
                                 <input
                                     type="text"
@@ -623,7 +926,7 @@ export default function CallDetailsPage() {
                                 {transcriptQuery && (
                                     <button onClick={() => setTranscriptQuery("")}
                                         className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs">
-                                        ✕
+                                        <X className="w-3.5 h-3.5" />
                                     </button>
                                 )}
                             </div>
@@ -642,7 +945,9 @@ export default function CallDetailsPage() {
                     <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
                         <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-white/5 p-5">
                             <div className="flex items-center justify-between mb-4">
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">⏱ Conversation Timeline</p>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                                    <Clock className="w-3.5 h-3.5" /> Conversation Timeline
+                                </p>
                                 {timeline.length > 0 && (
                                     <span className="text-xs text-violet-400 font-bold px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-500/20">
                                         {timeline.length} phases
@@ -659,7 +964,9 @@ export default function CallDetailsPage() {
                         </div>
 
                         <div className="lg:col-span-3 rounded-2xl border border-white/10 bg-white/5 p-5">
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">📋 Transcript at Selected Phase</p>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                                <ClipboardList className="w-3.5 h-3.5" /> Transcript at Selected Phase
+                            </p>
                             {timeline.length > 0 ? (
                                 <PhaseTranscript
                                     transcript={call.transcript}
@@ -668,7 +975,7 @@ export default function CallDetailsPage() {
                                 />
                             ) : (
                                 <div className="flex flex-col items-center justify-center h-40 text-slate-500 text-sm gap-2">
-                                    <span className="text-3xl">⏱</span>
+                                    <Clock className="w-8 h-8" />
                                     <span>Select a phase from the timeline</span>
                                 </div>
                             )}
