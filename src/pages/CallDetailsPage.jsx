@@ -323,6 +323,7 @@ export default function CallDetailsPage() {
     // ── Presentation-only additions: do not affect data, routing, or API ───
     const [copiedLink, setCopiedLink] = useState(false);
     const [copiedTranscript, setCopiedTranscript] = useState(false);
+    const [shareToast, setShareToast] = useState(false);
 
     useEffect(() => {
         api.get(`/api/calls/${id}`)
@@ -409,15 +410,36 @@ export default function CallDetailsPage() {
         }
     };
 
-    // ── Presentation-only: copy the current page URL to the clipboard ──────
-    const handleCopyLink = async () => {
-        try {
-            await navigator.clipboard.writeText(window.location.href);
-            setCopiedLink(true);
-            setTimeout(() => setCopiedLink(false), 1800);
-        } catch {
-            /* clipboard unavailable — no-op */
+    // ── Share this call: native share sheet when available, otherwise copy the
+    //    link and show a toast. Frontend-only — no backend changes. ─────────
+    const handleShare = async () => {
+        const title = call?.customerName || call?.fileName || "Call Report";
+        const shareUrl = window.location.href;
+
+        const copyAndNotify = async () => {
+            try {
+                await navigator.clipboard.writeText(shareUrl);
+                setCopiedLink(true);
+                setShareToast(true);
+                setTimeout(() => setCopiedLink(false), 1800);
+                setTimeout(() => setShareToast(false), 3200);
+            } catch {
+                /* clipboard unavailable — no-op */
+            }
+        };
+
+        if (navigator.share) {
+            try {
+                await navigator.share({ title: `${title} — Call Report`, text: `Call analysis for ${title}`, url: shareUrl });
+                return;
+            } catch (err) {
+                if (err?.name === "AbortError") return; // user dismissed the share sheet
+                await copyAndNotify();
+                return;
+            }
         }
+
+        await copyAndNotify();
     };
 
     // ── Presentation-only: copy the raw transcript text ─────────────────────
@@ -516,8 +538,8 @@ export default function CallDetailsPage() {
 
                     <div className="ml-auto flex items-center gap-2">
                         <button
-                            onClick={handleCopyLink}
-                            title="Copy link to this call"
+                            onClick={handleShare}
+                            title="Share this call"
                             className="hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all
                                 border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 active:scale-95">
                             {copiedLink ? <CopyCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Share2 className="w-3.5 h-3.5" />}
@@ -763,8 +785,13 @@ export default function CallDetailsPage() {
                             const riskFlags   = parseJSONArray(call.riskFlags);
                             if (actionItems.length === 0 && riskFlags.length === 0) return null;
 
+                            // The Risk Flags card always renders (with a "no risks" fallback)
+                            // once this block renders at all, so two columns are only
+                            // warranted when Action Items also has content to show.
+                            const bothPresent = actionItems.length > 0;
+
                             return (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                <div className={`grid grid-cols-1 gap-5 ${bothPresent ? "md:grid-cols-2" : ""}`}>
                                     {actionItems.length > 0 && (
                                         <GlassCard className="p-5">
                                             <SectionLabel icon={CheckSquare} tone="#a1a1aa">Action Items</SectionLabel>
@@ -849,9 +876,10 @@ export default function CallDetailsPage() {
                             const buyingSignals = parseJSONArray(call.buyingSignals);
                             const objections    = parseJSONArray(call.objections);
                             if (buyingSignals.length === 0 && objections.length === 0) return null;
+                            const bothPresent = buyingSignals.length > 0 && objections.length > 0;
 
                             return (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                <div className={`grid grid-cols-1 gap-5 ${bothPresent ? "md:grid-cols-2" : ""}`}>
                                     {buyingSignals.length > 0 && (
                                         <GlassCard tone="rgba(16,185,129,0.2)" bg="rgba(16,185,129,0.05)" className="p-5">
                                             <SectionLabel icon={TrendingUp} tone="#34d399">Buying Signals</SectionLabel>
@@ -1135,6 +1163,22 @@ export default function CallDetailsPage() {
                     </div>
                 )}
             </main>
+
+            {shareToast && (
+                <div className="fixed bottom-6 right-6 left-6 sm:left-auto z-[100] flex items-center gap-3 px-5 py-4 rounded-2xl border backdrop-blur-xl shadow-2xl"
+                    style={{
+                        background: "rgba(16,185,129,0.15)",
+                        borderColor: "rgba(16,185,129,0.4)",
+                        animation: "slideUp 0.35s cubic-bezier(0.34,1.56,0.64,1)",
+                        boxShadow: "0 8px 32px rgba(16,185,129,0.2)",
+                    }}>
+                    <CopyCheck className="w-4.5 h-4.5 text-emerald-400 flex-shrink-0" />
+                    <span className="text-sm font-semibold" style={{ color: "#6ee7b7" }}>Link copied successfully</span>
+                    <button onClick={() => setShareToast(false)} className="ml-2 opacity-50 hover:opacity-100 transition-opacity">
+                        <X className="w-3.5 h-3.5 text-white" />
+                    </button>
+                </div>
+            )}
 
             <style>{`
                 @keyframes slideUp {

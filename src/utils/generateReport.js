@@ -1,40 +1,27 @@
 /**
  * generateReport.js  —  Convexa AI · Call Analytics PDF Report
  *
- * Changes vs previous version
+ * Premium executive-report redesign
  * ─────────────────────────────────────────────────────────────
- * FIX 1 – AI Insights section was silently dropped.
- *   Root cause: the label regex used  (?:${allLabels})  where allLabels was
- *   built with .join("|") on the raw strings.  Spaces inside label names
- *   (e.g. "Customer Intent") were never escaped, so the alternation broke
- *   on every label after the first word.  The regex matched nothing →
- *   parsed=false → fallback bullet-splitter ran instead, but the fallback
- *   itself filtered out "—" lines and non-blank empty lines in a way that
- *   dropped the whole section for structured LLM responses.
- *   Fix: escape each label individually; keep a robust two-pass approach
- *   (structured → inline-key → plain-text fallback).
+ * This report now mirrors the depth of the Call Details page instead of a
+ * plain data dump: a cover header, a hero AI Overall Score card, a call
+ * context strip (sentiment / outcome / call type / buying intent /
+ * confidence), and dedicated sections for Action Items, Risk Flags,
+ * Follow-Up Suggestions, Buying Signals, Objections and the Conversation
+ * Timeline — all reading from the exact same fields the UI already
+ * renders, so nothing here is invented. Sections whose underlying field is
+ * empty are simply skipped.
  *
- * FIX 2 – Bullet misalignment / overlap.
- *   Root cause: the dot was drawn at (x-3, y+1.8) but text started at (x, y).
- *   When a bullet wrapped to a second line the dot stayed at line 0 while
- *   text moved down, making them overlap.
- *   Fix: dot is now drawn at the vertical centre of the first line only and
- *   text X is always dot_x + gap (no magic offset arithmetic).
- *
- * FIX 3 – Insight cards now render as proper labelled blocks with a coloured
- *   left bar instead of a raw "Label: value" inline line.
- *
- * FIX 4 – Page-overflow guard was missing from several sections.
- *   Every block now calls checkPage(minRemaining) before drawing.
- *
- * FIX 5 – Summary card height was sometimes calculated wrong (the rect was
- *   drawn with h=2 when summary existed, leaving text outside the card).
- *   Fixed by computing cardH before drawing the rect.
+ * Carried over unchanged from the previous version (still correct):
+ *  - Two-pass AI Insights parser (structured label match → fallback bullets).
+ *  - Bullet dot vertical-centering fix.
+ *  - Page-overflow guards (checkPage) before every drawn block.
+ *  - Keyword chip line-wrapping logic.
  */
 
 import { jsPDF } from "jspdf";
 
-// ─── Brand palette ────────────────────────────────────────────────────────────
+// ─── Brand palette (matches the in-app dark theme) ───────────────────────────
 const C = {
     bg:         [10,  10,  26 ],
     card:       [20,  17,  55 ],
@@ -52,14 +39,22 @@ const C = {
     border:     [30,  27,  75 ],
 };
 
-// Canonical insight sections with individual colours
+// Canonical insight sections (colour only — no emoji, since core PDF fonts
+// can't render them reliably; the coloured left bar carries the identity).
 const INSIGHT_DEFS = [
-    { key: "Customer Intent",    emoji: "🎯", color: C.accent  },
-    { key: "Main Issue",         emoji: "🔍", color: C.blue    },
-    { key: "Customer Concern",   emoji: "⚠",  color: C.amber   },
-    { key: "Outcome",            emoji: "✅", color: C.emerald },
-    { key: "Agent Performance",  emoji: "👤", color: C.rose    },
+    { key: "Customer Intent",   color: C.accent  },
+    { key: "Main Issue",        color: C.blue    },
+    { key: "Customer Concern",  color: C.amber   },
+    { key: "Outcome",           color: C.emerald },
+    { key: "Agent Performance", color: C.rose    },
 ];
+
+const RISK_COLORS    = { High: C.red, Medium: C.amber, Low: [234, 179, 8] };
+const OUTCOME_COLORS = {
+    "Won": C.emerald, "Lost": C.red, "Follow Up Required": C.amber,
+    "Escalated": [249, 115, 22], "Pending": C.amber,
+};
+const INTENT_COLORS = { High: C.emerald, Medium: C.amber, Low: [249, 115, 22] };
 
 // ─── Primitive helpers ────────────────────────────────────────────────────────
 
@@ -86,7 +81,7 @@ function wrapText(doc, text, maxWidth) {
 /** Strip common markdown artifacts */
 function clean(str) {
     if (!str) return "—";
-    return str
+    return String(str)
         .replace(/\*\*(.*?)\*\*/g, "$1")
         .replace(/\*(.*?)\*/g, "$1")
         .replace(/`(.*?)`/g, "$1")
@@ -103,6 +98,21 @@ function parseList(str) {
         .filter(Boolean);
 }
 
+/** Parses fields that may already be an array, a JSON array string, or
+ *  absent — mirrors the same helper used on the Call Details page so the
+ *  report never shows data the UI wouldn't. */
+function parseJSONArray(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    if (typeof value !== "string") return [];
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
 function fmtDate(iso) {
     if (!iso) return "—";
     try {
@@ -113,17 +123,76 @@ function fmtDate(iso) {
     } catch { return iso; }
 }
 
+function fmtDateShort(iso) {
+    if (!iso) return "—";
+    try {
+        return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    } catch { return iso; }
+}
+
+function scoreColor(score) {
+    if (score == null) return C.accent;
+    return score >= 70 ? C.emerald : score >= 50 ? C.amber : C.red;
+}
+
+function scoreQualitative(score) {
+    if (score == null) return "Not scored";
+    if (score >= 85) return "Excellent";
+    if (score >= 70) return "Good";
+    if (score >= 50) return "Fair";
+    return "Needs Improvement";
+}
+
+/** Fallback conversation-phase detector — same heuristic as the Call Details
+ *  page's client-side fallback, used only when the call has no stored
+ *  `timeline` field so the report still has something meaningful to show. */
+function buildFallbackTimeline(transcript) {
+    if (!transcript) return [];
+    const PHASES = [
+        { keywords: ["hello","hi","good morning","good afternoon","good evening","welcome","how can i"], title: "Greeting" },
+        { keywords: ["problem","issue","trouble","not working","error","complaint","concern","unable"], title: "Customer Problem" },
+        { keywords: ["let me check","looking into","verify","account","searching"], title: "Investigation" },
+        { keywords: ["solution","can help","i can","fix","resolve","offer","provide","discount","waive"], title: "Solution Discussion" },
+        { keywords: ["payment","billing","charge","invoice","refund","credit"], title: "Payment / Billing" },
+        { keywords: ["escalat","transfer","supervisor","manager"], title: "Escalation" },
+        { keywords: ["anything else","is there anything","satisfied","happy","resolved","closed"], title: "Call Closure" },
+    ];
+    const words = transcript.split(/\s+/);
+    const WPM = 150;
+    const timeline = [];
+    let lastIdx = -1;
+    PHASES.forEach(phase => {
+        for (let wi = 0; wi < words.length; wi++) {
+            const chunk = words.slice(wi, wi + 6).join(" ").toLowerCase();
+            if (phase.keywords.some(kw => chunk.includes(kw))) {
+                if (wi > lastIdx + 30) {
+                    const totalSec = Math.round((wi / WPM) * 60);
+                    const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
+                    const ss = String(totalSec % 60).padStart(2, "0");
+                    timeline.push({ time: `${mm}:${ss}`, title: phase.title });
+                    lastIdx = wi;
+                    break;
+                }
+            }
+        }
+    });
+    if (timeline.length === 0 || timeline[0].time !== "00:00") {
+        timeline.unshift({ time: "00:00", title: "Opening" });
+    }
+    return timeline;
+}
+
 // ─── PDF state (module-level, reset on each call) ────────────────────────────
 
 let _doc, PW, PH, MARGIN, CONTENT, _y, _pageNum;
 
 function init(doc) {
-    _doc    = doc;
-    PW      = doc.internal.pageSize.getWidth();
-    PH      = doc.internal.pageSize.getHeight();
-    MARGIN  = 14;
-    CONTENT = PW - MARGIN * 2;
-    _y      = 0;
+    _doc     = doc;
+    PW       = doc.internal.pageSize.getWidth();
+    PH       = doc.internal.pageSize.getHeight();
+    MARGIN   = 14;
+    CONTENT  = PW - MARGIN * 2;
+    _y       = 0;
     _pageNum = 1;
 }
 
@@ -146,7 +215,7 @@ function drawFooter() {
     _doc.setFont("helvetica", "normal");
     _doc.setFontSize(7.5);
     _doc.setTextColor(...C.dim);
-    _doc.text("Convexa AI · Conversation Intelligence Platform", MARGIN, fy);
+    _doc.text("Convexa AI · Conversation Intelligence Platform · Confidential Report", MARGIN, fy);
     _doc.text(`Page ${_pageNum}`, PW - MARGIN, fy, { align: "right" });
     _doc.text(`Generated: ${new Date().toLocaleString()}`, PW / 2, fy, { align: "center" });
 }
@@ -167,29 +236,31 @@ function checkPage(needed) {
 
 // ─── Reusable layout blocks ───────────────────────────────────────────────────
 
-function sectionHeader(label, color = C.accent) {
+function sectionHeader(label, color = C.accent, sub = null) {
     checkPage(18);
     filledRect(_doc, MARGIN, y(), 3, 7, 1.5, color);
     _doc.setFont("helvetica", "bold");
     _doc.setFontSize(9.5);
     _doc.setTextColor(...C.muted);
     _doc.text(label.toUpperCase(), MARGIN + 7, y() + 5.5);
+    if (sub) {
+        _doc.setFont("helvetica", "normal");
+        _doc.setFontSize(8);
+        _doc.setTextColor(...C.dim);
+        _doc.text(sub, PW - MARGIN, y() + 5.5, { align: "right" });
+    }
     addY(14);
 }
 
-/**
- * FIX 2 – bullet with correct dot alignment.
- * Dot is always drawn at the vertical centre of the FIRST line only.
- */
+/** Bullet with the dot vertically centred on the first text line only. */
 function bullet(text, xIndent, dotColor = C.accent) {
-    const x      = MARGIN + xIndent;
-    const maxW   = CONTENT - xIndent - 2;
-    const lines  = wrapText(_doc, text, maxW);
-    const lineH  = 5.4;
+    const x     = MARGIN + xIndent;
+    const maxW  = CONTENT - xIndent - 2;
+    const lines = wrapText(_doc, text, maxW);
+    const lineH = 5.4;
 
     checkPage(lines.length * lineH + 4);
 
-    // Dot: centred on first text line
     _doc.setFillColor(...dotColor);
     _doc.circle(x - 4, y() + lineH / 2 - 0.8, 1.2, "F");
 
@@ -202,33 +273,14 @@ function bullet(text, xIndent, dotColor = C.accent) {
     addY(lines.length * lineH + 3.5);
 }
 
-// ─── AI Insights parser ──────────────────────────────────────────────────────
-/**
- * FIX 1 – robust two-pass parser.
- *
- * Pass 1 (structured): look for each canonical label followed by a colon
- *   (optionally with markdown heading prefix).  Escape spaces in the label
- *   individually so "Customer Intent:" works even inside a larger string.
- *
- * Pass 2 (inline): labels that appear with no newline before them
- *   (LLM returned everything on one line).
- *
- * Pass 3 (fallback): if nothing was found, treat the whole text as a single
- *   unstructured block and bullet-split it.
- *
- * Returns: Array<{ label, color, lines: string[] }>
- */
+// ─── AI Insights parser (unchanged logic) ────────────────────────────────────
+
 function parseInsightSections(raw) {
     if (!raw?.trim()) return [];
-
     const results = [];
 
     for (const def of INSIGHT_DEFS) {
-        // Escape each character in the label (handles spaces, parentheses, etc.)
         const escapedLabel = def.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-        // Match: optional markdown heading + label + optional colon + content
-        // Content ends at the next canonical label or end-of-string.
         const nextLabels = INSIGHT_DEFS
             .filter(d => d.key !== def.key)
             .map(d => d.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
@@ -249,7 +301,6 @@ function parseInsightSections(raw) {
         }
     }
 
-    // Fallback: no structured sections found → treat whole text as bullets
     if (results.length === 0) {
         const bullets = raw
             .split(/\n/)
@@ -261,6 +312,172 @@ function parseInsightSections(raw) {
     return results;
 }
 
+// ─── Section renderers ────────────────────────────────────────────────────────
+
+function drawActionItems(items) {
+    sectionHeader("Action Items", C.accent);
+    const lineH = 5.4;
+    items.forEach(item => {
+        const title     = typeof item === "string" ? item : (item?.title || "—");
+        const completed = typeof item === "object" && !!item?.completed;
+        const lines     = wrapText(_doc, clean(title), CONTENT - 14);
+        const blockH    = Math.max(lines.length * lineH, 6) + 3;
+
+        checkPage(blockH + 2);
+
+        if (completed) {
+            filledRect(_doc, MARGIN, y() + 0.5, 4.2, 4.2, 1, C.emerald);
+            _doc.setDrawColor(...C.white);
+            _doc.setLineWidth(0.5);
+            _doc.line(MARGIN + 0.9, y() + 2.7, MARGIN + 1.8, y() + 3.6);
+            _doc.line(MARGIN + 1.8, y() + 3.6, MARGIN + 3.4, y() + 1.2);
+        } else {
+            _doc.setDrawColor(...C.dim);
+            _doc.setLineWidth(0.4);
+            _doc.roundedRect(MARGIN, y() + 0.5, 4.2, 4.2, 1, 1, "S");
+        }
+
+        _doc.setFont("helvetica", "normal");
+        _doc.setFontSize(9.5);
+        _doc.setTextColor(...(completed ? C.dim : C.white));
+        lines.forEach((line, i) => _doc.text(line, MARGIN + 8, y() + 4 + i * lineH));
+
+        addY(blockH);
+    });
+    addY(4);
+}
+
+function drawRiskFlags(flags) {
+    sectionHeader("Risk Flags", C.amber);
+
+    if (flags.length === 0) {
+        checkPage(14);
+        filledRect(_doc, MARGIN, y(), CONTENT, 12, 3, C.card);
+        _doc.setFont("helvetica", "normal");
+        _doc.setFontSize(9);
+        _doc.setTextColor(...C.emerald);
+        _doc.text("No active risks detected.", MARGIN + 6, y() + 7.5);
+        addY(16);
+        return;
+    }
+
+    flags.forEach(flag => {
+        const severity = typeof flag === "object" ? flag?.severity : null;
+        const message  = clean(typeof flag === "string" ? flag : flag?.message);
+        const color    = RISK_COLORS[severity] || C.amber;
+        const lines    = wrapText(_doc, message, CONTENT - 16);
+        const cardH    = Math.max(lines.length * 5.2 + (severity ? 11 : 7), 14);
+
+        checkPage(cardH + 4);
+        filledRect(_doc, MARGIN, y(), CONTENT, cardH, 3, C.card);
+        filledRect(_doc, MARGIN, y(), 3, cardH, 1.5, color);
+
+        let ty = y() + 6.5;
+        if (severity) {
+            _doc.setFont("helvetica", "bold");
+            _doc.setFontSize(7.5);
+            _doc.setTextColor(...color);
+            _doc.text(`${severity.toUpperCase()} RISK`, MARGIN + 8, ty);
+            ty += 5.2;
+        }
+        _doc.setFont("helvetica", "normal");
+        _doc.setFontSize(9.5);
+        _doc.setTextColor(...C.white);
+        lines.forEach((line, i) => _doc.text(line, MARGIN + 8, ty + i * 5.2));
+
+        addY(cardH + 4);
+    });
+    addY(2);
+}
+
+function drawFollowUps(suggestions) {
+    sectionHeader("Follow-Up Suggestions", C.blue);
+    suggestions.forEach(s => bullet(clean(s), 8, C.blue));
+    addY(4);
+}
+
+function drawBuyingSignals(signals) {
+    sectionHeader("Buying Signals", C.emerald);
+    let kx = MARGIN;
+    let ky = y();
+    signals.forEach(sig => {
+        const text = clean(sig);
+        _doc.setFont("helvetica", "bold");
+        _doc.setFontSize(8.5);
+        const w = _doc.getTextWidth(text) + 14;
+
+        if (kx + w > PW - MARGIN) {
+            kx = MARGIN;
+            ky += 10;
+            if (ky > PH - 20) {
+                setY(ky);
+                newPage();
+                ky = y();
+            }
+        }
+
+        filledRect(_doc, kx, ky - 5.5, w, 8, 4, [16, 40, 32]);
+        _doc.setFillColor(...C.emerald);
+        _doc.circle(kx + 5.5, ky - 1.7, 1, "F");
+        _doc.setTextColor(...C.emerald);
+        _doc.text(text, kx + 9, ky);
+        kx += w + 5;
+    });
+    setY(ky + 13);
+}
+
+function drawObjections(objections) {
+    sectionHeader("Objections", C.rose);
+    objections.forEach(obj => {
+        const text     = clean(typeof obj === "string" ? obj : obj?.objection);
+        const resolved = typeof obj === "object" && !!obj?.resolved;
+        const lines    = wrapText(_doc, text, CONTENT - 40);
+        const cardH    = Math.max(lines.length * 5.2 + 7, 13);
+
+        checkPage(cardH + 4);
+        filledRect(_doc, MARGIN, y(), CONTENT, cardH, 3, C.card);
+
+        _doc.setFont("helvetica", "normal");
+        _doc.setFontSize(9.5);
+        _doc.setTextColor(...C.white);
+        lines.forEach((line, i) => _doc.text(line, MARGIN + 6, y() + 6 + i * 5.2));
+
+        const tagColor = resolved ? C.emerald : C.red;
+        const tagLabel = resolved ? "RESOLVED" : "UNRESOLVED";
+        _doc.setFont("helvetica", "bold");
+        _doc.setFontSize(7);
+        const tagW = _doc.getTextWidth(tagLabel) + 6;
+        filledRect(_doc, MARGIN + CONTENT - tagW - 4, y() + 4, tagW, 5.5, 2.5, tagColor);
+        _doc.setTextColor(...C.bg);
+        _doc.text(tagLabel, MARGIN + CONTENT - tagW - 4 + tagW / 2, y() + 7.7, { align: "center" });
+
+        addY(cardH + 4);
+    });
+    addY(2);
+}
+
+function drawTimeline(timeline) {
+    sectionHeader("Conversation Timeline", C.blue, `${timeline.length} phase${timeline.length !== 1 ? "s" : ""}`);
+    const PHASE_COLORS = [C.accent, C.blue, C.emerald, C.amber, C.rose, [6, 182, 212], [249, 115, 22]];
+    timeline.forEach((seg, i) => {
+        checkPage(11);
+        const color = PHASE_COLORS[i % PHASE_COLORS.length];
+        filledRect(_doc, MARGIN, y(), CONTENT, 9, 2.5, C.cardAlt);
+        _doc.setFillColor(...color);
+        _doc.circle(MARGIN + 5, y() + 4.5, 1.6, "F");
+        _doc.setFont("helvetica", "bold");
+        _doc.setFontSize(8.5);
+        _doc.setTextColor(...color);
+        _doc.text(String(seg.time || "—"), MARGIN + 10, y() + 6);
+        _doc.setFont("helvetica", "normal");
+        _doc.setFontSize(9);
+        _doc.setTextColor(...C.white);
+        _doc.text(clean(seg.title), MARGIN + 30, y() + 6);
+        addY(11);
+    });
+    addY(3);
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export function generateCallReport(call) {
@@ -269,11 +486,14 @@ export function generateCallReport(call) {
     const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
     init(doc);
 
-    // ── PAGE 1 BACKGROUND ────────────────────────────────────────────────────
+    const callName = call.customerName || call.fileName || "Untitled Call";
+
+    // ═════════════════════════════════════════
+    //  PAGE 1 — COVER
+    // ═════════════════════════════════════════
     drawPageBg();
 
-    // ── HEADER BAND (gradient simulation) ────────────────────────────────────
-    const BAND_H = 52;
+    const BAND_H = 56;
     const steps  = 24;
     for (let i = 0; i < steps; i++) {
         const t = i / steps;
@@ -283,52 +503,65 @@ export function generateCallReport(call) {
         doc.setFillColor(r, g, b);
         doc.rect(0, i * (BAND_H / steps), PW, BAND_H / steps + 0.5, "F");
     }
-
-    // Left accent bar
     filledRect(doc, 0, 0, 4, BAND_H, 0, C.accent);
 
-    // Logo
+    // Logo + tagline
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
     doc.setTextColor(...C.white);
-    doc.text("CONVEXA", MARGIN + 4, 18);
+    doc.text("CONVEXA", MARGIN + 4, 16);
     doc.setTextColor(...C.accent);
-    doc.text(" AI", MARGIN + 4 + doc.getTextWidth("CONVEXA"), 18);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.5);
-    doc.setTextColor(...C.muted);
-    doc.text("CONVERSATION INTELLIGENCE PLATFORM", MARGIN + 4, 25);
-
-    // Report title
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.setTextColor(...C.white);
-    doc.text("Call Analytics Report", PW - MARGIN, 18, { align: "right" });
+    doc.text(" AI", MARGIN + 4 + doc.getTextWidth("CONVEXA"), 16);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(...C.muted);
-    doc.text("Confidential · For Internal Use", PW - MARGIN, 25, { align: "right" });
+    doc.text("CONVERSATION INTELLIGENCE PLATFORM", MARGIN + 4, 22);
 
-    // Divider
+    // Call name (cover title)
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12.5);
+    doc.setTextColor(...C.white);
+    const nameLine = wrapText(doc, callName, PW * 0.5)[0];
+    doc.text(nameLine, MARGIN + 4, 36);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.muted);
+    doc.text("CALL NAME", MARGIN + 4, 42);
+
+    // Report title + analysis date (right)
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...C.white);
+    doc.text("Call Analytics Report", PW - MARGIN, 16, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...C.muted);
+    doc.text("Confidential · For Internal Use", PW - MARGIN, 22, { align: "right" });
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(...C.accent);
+    doc.text(fmtDateShort(call.createdAt), PW - MARGIN, 36, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.muted);
+    doc.text("ANALYSIS DATE", PW - MARGIN, 42, { align: "right" });
+
     doc.setDrawColor(...C.accent);
     doc.setLineWidth(0.4);
     doc.line(MARGIN, BAND_H, PW - MARGIN, BAND_H);
 
     setY(BAND_H + 8);
 
-    // ── SECTION 1: CALL INFORMATION ──────────────────────────────────────────
+    // ── CALL INFORMATION ──────────────────────────────────────────────────
     sectionHeader("Call Information", C.accent);
-
     const infoRows = [
         ["File Name", call.fileName || "—"],
-        ["Call ID",   `#${call.id    || "—"}`],
+        ["Call ID",   `#${call.id || "—"}`],
         ["Date",      fmtDate(call.createdAt)],
-        ["Status",    call.status    || "COMPLETED"],
+        ["Status",    call.status || "COMPLETED"],
     ];
-
     const INFO_H = infoRows.length * 9 + 6;
     filledRect(doc, MARGIN, y(), CONTENT, INFO_H, 3, C.card);
-
     doc.setFontSize(9);
     infoRows.forEach(([label, value], i) => {
         const ry = y() + 6 + i * 9;
@@ -340,14 +573,13 @@ export function generateCallReport(call) {
         const vLines = wrapText(doc, value, CONTENT - 55);
         doc.text(vLines[0] || "—", MARGIN + 40, ry);
     });
-
     addY(INFO_H + 8);
 
-    // ── SECTION 2: EXECUTIVE SUMMARY ─────────────────────────────────────────
+    // ── EXECUTIVE SUMMARY ────────────────────────────────────────────────
     if (call.summary) {
         sectionHeader("Executive Summary", C.blue);
         const summaryLines = wrapText(doc, clean(call.summary), CONTENT - 10);
-        const cardH        = summaryLines.length * 5.5 + 12;
+        const cardH = summaryLines.length * 5.5 + 12;
         checkPage(cardH + 8);
         filledRect(doc, MARGIN, y(), CONTENT, cardH, 3, C.card);
         doc.setFont("helvetica", "italic");
@@ -357,75 +589,60 @@ export function generateCallReport(call) {
         addY(cardH + 8);
     }
 
-    // ── SECTION 3: SENTIMENT + OVERALL SCORE ─────────────────────────────────
-    sectionHeader("Sentiment & Overall Score", C.emerald);
-
-    const sentColor = call.sentiment === "POSITIVE" ? C.emerald
-                    : call.sentiment === "NEGATIVE" ? C.red
-                    : C.amber;
-    const sentLabel = call.sentiment === "POSITIVE" ? "Positive"
-                    : call.sentiment === "NEGATIVE" ? "Negative"
-                    : "Neutral";
-
-    // Sentiment card (left half)
-    filledRect(doc, MARGIN, y(), 87, 24, 3, C.card);
-    filledRect(doc, MARGIN + 6, y() + 5, 16, 14, 7, sentColor);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(...C.bg);
-    doc.text(sentLabel.charAt(0), MARGIN + 14, y() + 13, { align: "center" });
-    doc.setFontSize(12);
-    doc.setTextColor(...sentColor);
-    doc.text(sentLabel, MARGIN + 26, y() + 13);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
-    doc.setTextColor(...C.dim);
-    doc.text("Sentiment Analysis", MARGIN + 7, y() + 21);
-
-    // Overall score card (right half)
+    // ── AI OVERALL SCORE (hero card) ─────────────────────────────────────
     if (call.overallScore != null) {
-        const sx = MARGIN + 95;
-        filledRect(doc, sx, y(), 87, 24, 3, C.card);
+        sectionHeader("AI Overall Score", C.accent);
+        const HERO_H = 34;
+        checkPage(HERO_H + 8);
+        const sColor = scoreColor(call.overallScore);
+        filledRect(doc, MARGIN, y(), CONTENT, HERO_H, 4, C.card);
+
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(22);
-        doc.setTextColor(...C.accent);
-        doc.text(`${call.overallScore}`, sx + 22, y() + 14, { align: "center" });
-        doc.setFontSize(10);
+        doc.setFontSize(30);
+        doc.setTextColor(...sColor);
+        doc.text(`${call.overallScore}`, MARGIN + 10, y() + 21);
+        const numW = doc.getTextWidth(`${call.overallScore}`);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(11);
         doc.setTextColor(...C.muted);
-        doc.text("/ 100", sx + 34, y() + 14);
+        doc.text("/ 100", MARGIN + 10 + numW + 3, y() + 21);
+
+        const qualLabel = scoreQualitative(call.overallScore);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        const pillW = doc.getTextWidth(qualLabel) + 12;
+        filledRect(doc, MARGIN + CONTENT - pillW - 8, y() + 9, pillW, 8, 4, sColor);
+        doc.setTextColor(...C.bg);
+        doc.text(qualLabel, MARGIN + CONTENT - pillW - 8 + pillW / 2, y() + 14.5, { align: "center" });
+
         doc.setFont("helvetica", "normal");
         doc.setFontSize(7.5);
         doc.setTextColor(...C.dim);
-        doc.text("Overall QA Score", sx + 6, y() + 21);
-        scoreBar(doc, sx + 6, y() + 21, 74, 2.5, call.overallScore, C.accent);
+        doc.text("Overall QA score across the full conversation", MARGIN + 10, y() + 27);
+
+        scoreBar(doc, MARGIN + 8, y() + HERO_H - 5, CONTENT - 16, 3, call.overallScore, sColor);
+        addY(HERO_H + 8);
     }
 
-    addY(32);
-
-    // ── SECTION 4: QA SCORE BREAKDOWN ────────────────────────────────────────
-    const hasDims = call.communication || call.professionalism
-                 || call.problemResolution || call.customerSatisfaction;
-
+    // ── PERFORMANCE BREAKDOWN ────────────────────────────────────────────
+    const hasDims = call.communication != null || call.professionalism != null
+                 || call.problemResolution != null || call.customerSatisfaction != null;
     if (hasDims) {
-        sectionHeader("QA Score Breakdown", C.accent);
-
+        sectionHeader("Performance Breakdown", C.accent);
         const dims = [
             { label: "Communication",        key: "communication",        color: C.accent  },
             { label: "Professionalism",       key: "professionalism",      color: C.emerald },
             { label: "Problem Resolution",    key: "problemResolution",    color: C.blue    },
             { label: "Customer Satisfaction", key: "customerSatisfaction", color: C.amber   },
         ];
-
+        checkPage(48);
         const CW = (CONTENT - 4) / 2;
-
         dims.forEach(({ label, key, color }, i) => {
             const col = i % 2;
             const row = Math.floor(i / 2);
             const cx  = MARGIN + col * (CW + 4);
             const cy  = y() + row * 22;
-
             filledRect(doc, cx, cy, CW, 18, 3, C.card);
-
             const score = call[key];
             const scoreStr = score != null ? `${score}` : "—";
             doc.setFont("helvetica", "bold");
@@ -438,59 +655,154 @@ export function generateCallReport(call) {
             doc.text(label, cx + 10 + doc.getTextWidth(scoreStr) + 4, cy + 11);
             scoreBar(doc, cx + 7, cy + 13, CW - 14, 2.2, score, color);
         });
-
         addY(48);
+    }
+
+    // ── CALL CONTEXT STRIP (sentiment / outcome / call type / intent / confidence) ──
+    const hasContext = call.sentiment || call.outcomeStatus || call.callType
+        || call.buyingIntent || call.confidence != null;
+    if (hasContext) {
+        sectionHeader("Call Context", C.blue);
+        const items = [];
+        if (call.sentiment) {
+            const s = call.sentiment;
+            items.push({ label: "Sentiment", value: s.charAt(0) + s.slice(1).toLowerCase(), color: s === "POSITIVE" ? C.emerald : s === "NEGATIVE" ? C.red : C.amber });
+        }
+        if (call.outcomeStatus) items.push({ label: "Outcome", value: call.outcomeStatus, color: OUTCOME_COLORS[call.outcomeStatus] || C.muted });
+        if (call.callType) items.push({ label: "Call Type", value: call.callType, color: C.blue });
+        if (call.buyingIntent) items.push({ label: "Buying Intent", value: call.buyingIntent, color: INTENT_COLORS[call.buyingIntent] || C.muted });
+        if (call.confidence != null) {
+            const conf = Math.max(0, Math.min(100, call.confidence));
+            items.push({ label: "AI Confidence", value: `${conf}%`, color: conf >= 80 ? C.emerald : conf >= 50 ? C.amber : C.red });
+        }
+
+        const STRIP_H = 20;
+        checkPage(STRIP_H + 8);
+        filledRect(doc, MARGIN, y(), CONTENT, STRIP_H, 3, C.card);
+        const cw = CONTENT / items.length;
+        items.forEach((it, i) => {
+            const cx = MARGIN + i * cw + 6;
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(7);
+            doc.setTextColor(...C.dim);
+            doc.text(it.label.toUpperCase(), cx, y() + 7);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9.5);
+            doc.setTextColor(...it.color);
+            const val = wrapText(doc, it.value, cw - 8)[0];
+            doc.text(val, cx, y() + 14.5);
+            if (i > 0) {
+                doc.setDrawColor(...C.border);
+                doc.setLineWidth(0.3);
+                doc.line(MARGIN + i * cw, y() + 4, MARGIN + i * cw, y() + STRIP_H - 4);
+            }
+        });
+        addY(STRIP_H + 8);
     }
 
     drawFooter();
 
     // ═════════════════════════════════════════
-    //  PAGE 2
+    //  PAGE 2 — INSIGHTS, ACTIONS, RISKS
     // ═════════════════════════════════════════
     newPage();
 
-    // ── SECTION 5: KEYWORDS ───────────────────────────────────────────────────
+    // ── KEY INSIGHTS ─────────────────────────────────────────────────────
+    if (call.insights) {
+        sectionHeader("Key Insights", C.blue);
+        const sections = parseInsightSections(call.insights);
+
+        if (sections.length > 0 && sections[0].label !== null) {
+            sections.forEach(({ label, color, lines }) => {
+                const cardH = Math.max(lines.length * 5.5 + 14, 20);
+                checkPage(cardH + 6);
+                filledRect(doc, MARGIN, y(), CONTENT, cardH, 3, C.card);
+                filledRect(doc, MARGIN, y(), 3, cardH, 1.5, color);
+                doc.setFont("helvetica", "bold");
+                doc.setFontSize(8);
+                doc.setTextColor(...color);
+                doc.text(label.toUpperCase(), MARGIN + 8, y() + 6);
+                doc.setFont("helvetica", "normal");
+                doc.setFontSize(9.5);
+                doc.setTextColor(...C.white);
+                lines.forEach((line, i) => doc.text(line, MARGIN + 8, y() + 12 + i * 5.5));
+                addY(cardH + 4);
+            });
+        } else {
+            sections.forEach(({ lines }) => lines.forEach(line => bullet(line, 8, C.blue)));
+        }
+        addY(4);
+    }
+
+    // ── ACTION ITEMS ─────────────────────────────────────────────────────
+    const actionItems = parseJSONArray(call.actionItems);
+    if (actionItems.length > 0) {
+        checkPage(24);
+        drawActionItems(actionItems);
+    }
+
+    // ── RISK FLAGS (rendered whenever Action Items rendered too, or on its own) ──
+    const riskFlags = parseJSONArray(call.riskFlags);
+    if (actionItems.length > 0 || riskFlags.length > 0) {
+        checkPage(24);
+        drawRiskFlags(riskFlags);
+    }
+
+    // ── FOLLOW-UP SUGGESTIONS ─────────────────────────────────────────────
+    const followUps = parseJSONArray(call.followUpSuggestions);
+    if (followUps.length > 0) {
+        checkPage(24);
+        drawFollowUps(followUps);
+    }
+
+    // ── BUYING SIGNALS ────────────────────────────────────────────────────
+    const buyingSignals = parseJSONArray(call.buyingSignals);
+    if (buyingSignals.length > 0) {
+        checkPage(24);
+        drawBuyingSignals(buyingSignals);
+    }
+
+    // ── OBJECTIONS ────────────────────────────────────────────────────────
+    const objections = parseJSONArray(call.objections);
+    if (objections.length > 0) {
+        checkPage(24);
+        drawObjections(objections);
+    }
+
+    // ── KEYWORDS ──────────────────────────────────────────────────────────
     const keywords = parseList(call.keywords);
     if (keywords.length > 0) {
+        checkPage(20);
         sectionHeader("Keywords", C.blue);
-
-        let kx = MARGIN;
-        let ky = y();
-
+        let kx = MARGIN, ky = y();
         keywords.forEach(kw => {
             const kw_clean = clean(kw);
             doc.setFont("helvetica", "bold");
             doc.setFontSize(8.5);
             const kwW = doc.getTextWidth(kw_clean) + 12;
-
             if (kx + kwW > PW - MARGIN) {
-                kx  = MARGIN;
+                kx = MARGIN;
                 ky += 10;
-                if (ky > PH - 20) {
-                    setY(ky);
-                    newPage();
-                    ky = y();
-                }
+                if (ky > PH - 20) { setY(ky); newPage(); ky = y(); }
             }
-
             filledRect(doc, kx, ky - 5.5, kwW, 8, 4, [28, 24, 78]);
             doc.setTextColor(...C.accent);
             doc.text(kw_clean, kx + 6, ky);
             kx += kwW + 5;
         });
-
         setY(ky + 13);
     }
 
-    // ── SECTION 6: STRENGTHS ──────────────────────────────────────────────────
+    // ── STRENGTHS ─────────────────────────────────────────────────────────
     const strengths = parseList(call.strengths);
     if (strengths.length > 0) {
+        checkPage(24);
         sectionHeader("Strengths", C.emerald);
         strengths.forEach(s => bullet(clean(s), 8, C.emerald));
         addY(4);
     }
 
-    // ── SECTION 7: AREAS FOR IMPROVEMENT ─────────────────────────────────────
+    // ── AREAS FOR IMPROVEMENT ─────────────────────────────────────────────
     const improvements = parseList(call.improvements);
     if (improvements.length > 0) {
         checkPage(24);
@@ -499,57 +811,26 @@ export function generateCallReport(call) {
         addY(4);
     }
 
-    // ── SECTION 8: AI INSIGHTS ────────────────────────────────────────────────
-    //
-    // FIX 1 + FIX 3: structured cards with coloured left bar; each section is
-    // a self-contained card.  Falls back to plain bullets for unstructured text.
-    // ─────────────────────────────────────────────────────────────────────────
-    if (call.insights) {
-        checkPage(30);
-        sectionHeader("AI Insights", C.blue);
-
-        const sections = parseInsightSections(call.insights);
-
-        if (sections.length > 0 && sections[0].label !== null) {
-            // Structured mode: one card per canonical section
-            sections.forEach(({ label, color, lines }) => {
-                const cardH = Math.max(lines.length * 5.5 + 14, 20);
-                checkPage(cardH + 6);
-
-                // Card background
-                filledRect(doc, MARGIN, y(), CONTENT, cardH, 3, C.card);
-
-                // Coloured left accent strip
-                filledRect(doc, MARGIN, y(), 3, cardH, 1.5, color);
-
-                // Label
-                doc.setFont("helvetica", "bold");
-                doc.setFontSize(8);
-                doc.setTextColor(...color);
-                doc.text(label.toUpperCase(), MARGIN + 8, y() + 6);
-
-                // Value lines
-                doc.setFont("helvetica", "normal");
-                doc.setFontSize(9.5);
-                doc.setTextColor(...C.white);
-                lines.forEach((line, i) => {
-                    doc.text(line, MARGIN + 8, y() + 12 + i * 5.5);
-                });
-
-                addY(cardH + 4);
-            });
-        } else {
-            // Unstructured fallback: plain bullet list
-            sections.forEach(({ lines }) => {
-                lines.forEach(line => bullet(line, 8, C.blue));
-            });
-        }
-
-        addY(6);
+    // ── CONVERSATION TIMELINE ─────────────────────────────────────────────
+    let timeline = [];
+    if (call.timeline) {
+        try {
+            const parsed = JSON.parse(call.timeline);
+            if (Array.isArray(parsed) && parsed.length > 0) timeline = parsed;
+        } catch { /* fall through to the transcript-derived fallback below */ }
+    }
+    if (timeline.length === 0 && call.transcript) {
+        timeline = buildFallbackTimeline(call.transcript);
+    }
+    if (timeline.length > 0) {
+        checkPage(24);
+        drawTimeline(timeline);
     }
 
+    drawFooter();
+
     // ═════════════════════════════════════════
-    //  PAGE 3+: TRANSCRIPT
+    //  PAGE 3+ — FULL TRANSCRIPT
     // ═════════════════════════════════════════
     if (call.transcript) {
         newPage();
@@ -560,7 +841,6 @@ export function generateCallReport(call) {
         doc.setTextColor(...C.muted);
 
         const transcriptLines = wrapText(doc, call.transcript, CONTENT - 4);
-
         transcriptLines.forEach(line => {
             if (y() > PH - 20) {
                 newPage();

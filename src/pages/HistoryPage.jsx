@@ -376,12 +376,12 @@ function CallRow({ call, T, onOpen, onDelete, onAction, playingId, setPlayingId 
 
     return (
         <div onClick={() => onOpen(call)}
-            className="group flex flex-col md:flex-row md:items-center gap-3 md:gap-4 px-4 sm:px-5 py-4 cursor-pointer transition-all"
+            className="group flex flex-col gap-3 md:grid md:grid-cols-[256px_200px_84px_172px] lg:grid-cols-[256px_minmax(0,1fr)_200px_84px_172px] md:items-center md:gap-4 px-4 sm:px-5 py-4 cursor-pointer transition-all"
             style={{ borderBottom: `1px solid ${T.divider}` }}
             onMouseEnter={e => e.currentTarget.style.background = T.panelHover}
             onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
 
-            <div className="flex items-center gap-3 md:w-64 min-w-0 flex-shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
                 <div onClick={e => e.stopPropagation()}>
                     <MiniAudioPlayer cloudinaryUrl={call.cloudinaryUrl} playingId={playingId} callId={call.id} onPlay={setPlayingId} onStop={() => setPlayingId(null)} />
                 </div>
@@ -391,19 +391,19 @@ function CallRow({ call, T, onOpen, onDelete, onAction, playingId, setPlayingId 
                 </div>
             </div>
 
-            <p className="text-xs flex-1 min-w-0 truncate hidden lg:block" style={{ color: T.textMuted }}>
+            <p className="text-xs min-w-0 truncate hidden lg:block" style={{ color: T.textMuted }}>
                 {call.summary || "No AI summary available yet."}
             </p>
 
-            <div className="flex flex-wrap items-center gap-1.5 md:w-auto flex-shrink-0">
+            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                 {sent && <Badge Icon={sent.Icon} label={sent.label} color={sent.color} bg={sent.bg} border={sent.border} />}
                 {riskCfg && <Badge Icon={riskCfg.Icon} label={riskCfg.label} color={riskCfg.color} bg={riskCfg.bg} border={riskCfg.border} />}
                 {call.outcome && <Badge Icon={Target} label={call.outcome} color="#a78bfa" bg="rgba(139,92,246,0.12)" border="rgba(139,92,246,0.3)" />}
             </div>
 
-            <div className="w-20 flex-shrink-0"><ScorePill score={call.overallScore} T={T} /></div>
+            <div><ScorePill score={call.overallScore} T={T} /></div>
 
-            <div className="flex items-center gap-1.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
                 <Link to={`/calls/${call.id}`}
                     className="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all"
                     style={{ background: "rgba(139,92,246,0.12)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.28)" }}>
@@ -648,11 +648,43 @@ export default function HistoryPage() {
         }
     };
 
-    /** Download / share aren't wired to a backend endpoint yet — surfaced
-     *  honestly as "coming soon" rather than faking success. */
-    const handleQuickAction = (action, call) => {
-        if (action === "download") setToast({ message: "Report export is coming soon.", type: "success" });
-        if (action === "share") setToast({ message: "Sharing is coming soon.", type: "success" });
+    /** Download generates the same premium PDF report used on the Call Details
+     *  page; Share uses the native share sheet when available and otherwise
+     *  falls back to copying a link to the call. Both are frontend-only —
+     *  no backend or API changes. */
+    const handleQuickAction = async (action, call) => {
+        if (action === "download") {
+            try {
+                const { generateCallReport } = await import("../utils/generateReport.js");
+                generateCallReport(call);
+                setToast({ message: "Report downloaded successfully", type: "success" });
+            } catch (err) {
+                console.error("Report generation failed:", err);
+                setToast({ message: "Could not generate report. Please try again.", type: "error" });
+            }
+            return;
+        }
+
+        if (action === "share") {
+            const title = call.customerName || titleFromFileName(call.fileName);
+            const shareUrl = `${window.location.origin}/calls/${call.id}`;
+            try {
+                if (navigator.share) {
+                    await navigator.share({ title: `${title} — Call Report`, text: `Call analysis for ${title}`, url: shareUrl });
+                    return;
+                }
+                await navigator.clipboard.writeText(shareUrl);
+                setToast({ message: "Link copied successfully", type: "success" });
+            } catch (err) {
+                if (err?.name === "AbortError") return; // user dismissed the native share sheet
+                try {
+                    await navigator.clipboard.writeText(shareUrl);
+                    setToast({ message: "Link copied successfully", type: "success" });
+                } catch {
+                    setToast({ message: "Could not copy link. Please try again.", type: "error" });
+                }
+            }
+        }
     };
 
     const openCall = (call) => navigate(`/calls/${call.id}`);
@@ -973,11 +1005,11 @@ export default function HistoryPage() {
                         </div>
                     ) : (
                         <div className="rounded-2xl overflow-hidden" style={{ background: T.panel, border: `1px solid ${T.panelBorder}` }}>
-                            <div className="hidden md:flex items-center gap-4 px-5 py-3" style={{ background: T.panelHover, borderBottom: `1px solid ${T.divider}` }}>
-                                <p className="w-64 text-xs font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Call</p>
-                                <p className="flex-1 text-xs font-bold uppercase tracking-wider hidden lg:block" style={{ color: T.textFaint }}>Summary</p>
+                            <div className="hidden md:grid md:grid-cols-[256px_200px_84px_172px] lg:grid-cols-[256px_minmax(0,1fr)_200px_84px_172px] items-center gap-4 px-5 py-3" style={{ background: T.panelHover, borderBottom: `1px solid ${T.divider}` }}>
+                                <p className="text-xs font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Call</p>
+                                <p className="text-xs font-bold uppercase tracking-wider hidden lg:block" style={{ color: T.textFaint }}>Summary</p>
                                 <p className="text-xs font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Status</p>
-                                <p className="w-20 text-xs font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Score</p>
+                                <p className="text-xs font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Score</p>
                                 <p className="text-xs font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Actions</p>
                             </div>
                             {filtered.map(call => (
