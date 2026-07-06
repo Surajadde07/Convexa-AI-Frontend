@@ -10,11 +10,14 @@ import {
     Hourglass, Circle, Target, ClipboardList, FileText, Clock,
     BarChart3, ArrowLeft, Phone, Lightbulb, CheckSquare, Check,
     Flag, CheckCircle, TrendingUp, MessageSquare, CheckCircle2,
-    Zap, Brain, KeyRound, X,
+    Zap, Brain, KeyRound, X, Sparkles, Download, Share2, RefreshCw,
+    Search, Copy, CopyCheck, Gauge, ShieldAlert, Rocket,
+    ThumbsUp, AlertOctagon, ListChecks, ChevronRight, Radio,
+    FileBarChart, HeartHandshake, Compass,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// UTILITIES
+// UTILITIES — unchanged business logic
 // ─────────────────────────────────────────────────────────────────────────────
 
 function parseList(str) {
@@ -41,16 +44,9 @@ const SENT_CONFIG = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SPRINT 1 — new-field utilities (outcome, action items, risk flags, etc.)
-// All new backend fields are read-only additions to the Overview tab.
+// New-field utilities (outcome, action items, risk flags, etc.) — unchanged
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Parses a TEXT column that stores a JSON array (of strings OR objects).
- * Mirrors the defensive style of parseList() above — never throws,
- * always returns an array, so the UI can render "empty state" placeholders
- * instead of crashing on old records that predate these columns.
- */
 function parseJSONArray(value) {
     if (!value) return [];
     if (Array.isArray(value)) return value; // already parsed (defensive)
@@ -88,36 +84,42 @@ const RISK_SEVERITY_CONFIG = {
 };
 const RISK_SEVERITY_FALLBACK = { color: "#f59e0b", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)" };
 
-/** Premium status badge for outcomeStatus. Gracefully no-ops on missing data. */
-function OutcomeStatusBadge({ status }) {
-    if (!status) return null;
-    const cfg = OUTCOME_CONFIG[status] || OUTCOME_FALLBACK;
+/** Icon chosen for a parsed insight section by key — presentational only, replaces emoji. */
+const INSIGHT_ICONS = {
+    summary: ClipboardList, overview: ClipboardList, recommendation: Compass,
+    recommendations: Compass, risk: ShieldAlert, risks: ShieldAlert,
+    opportunity: Rocket, opportunities: Rocket, strength: ThumbsUp, strengths: ThumbsUp,
+    improvement: Zap, improvements: Zap, trend: TrendingUp, trends: TrendingUp,
+    performance: Gauge, sentiment: HeartHandshake, next: ArrowLeft, action: ListChecks,
+};
+function insightIcon(key) {
+    const k = String(key || "").toLowerCase();
+    return INSIGHT_ICONS[k] || Sparkles;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESIGN-SYSTEM PRIMITIVES — visual language shared with the Dashboard
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SectionLabel({ icon: Icon, children, tone = "#8b5cf6" }) {
     return (
-        <span className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border"
-            style={{ background: cfg.bg, color: cfg.color, borderColor: cfg.border }}>
-            <cfg.icon className="w-3.5 h-3.5" strokeWidth={2.5} />
-            {status}
-        </span>
+        <div className="flex items-center gap-2">
+            {Icon && (
+                <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0"
+                    style={{ background: `${tone}1c`, border: `1px solid ${tone}35` }}>
+                    <Icon size={11} style={{ color: tone }} strokeWidth={2.5} />
+                </div>
+            )}
+            <span className="text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: tone }}>{children}</span>
+        </div>
     );
 }
 
-/** Clean linear progress bar for AI self-reported confidence (0-100). */
-function ConfidenceBar({ confidence }) {
-    if (confidence == null) return null;
-    const pct = Math.max(0, Math.min(100, confidence));
-    const color = pct >= 80 ? "#10b981" : pct >= 50 ? "#f59e0b" : "#ef4444";
+function GlassCard({ children, tone = "rgba(255,255,255,0.1)", bg = "rgba(255,255,255,0.05)", className = "", style = {} }) {
     return (
-        <div>
-            <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Target className="w-3.5 h-3.5" /> AI Confidence
-                </p>
-                <span className="text-xs font-bold" style={{ color }}>{pct}%</span>
-            </div>
-            <div className="w-full h-2 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }}>
-                <div className="h-2 rounded-full transition-all duration-700"
-                    style={{ width: `${pct}%`, background: color }} />
-            </div>
+        <div className={`relative overflow-hidden rounded-2xl border transition-all duration-300 ${className}`}
+            style={{ background: bg, borderColor: tone, ...style }}>
+            {children}
         </div>
     );
 }
@@ -127,14 +129,14 @@ function ScoreRing({ score, size = 80, stroke = 7, color = "#8b5cf6" }) {
     const circ = 2 * Math.PI * r;
     const pct = Math.min((score || 0) / 100, 1);
     return (
-        <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
-            <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#1e1b4b" strokeWidth={stroke} />
-            <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke}
-                strokeDasharray={`${pct*circ} ${circ}`} strokeLinecap="round"
-                style={{ transition: "stroke-dasharray 1s ease" }} />
+        <svg width={size} height={size} style={{ transform: "rotate(-90deg)", overflow: "visible" }}>
+            <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={stroke} />
+            <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+                strokeDasharray={`${pct * circ} ${circ}`} strokeLinecap="round"
+                style={{ transition: "stroke-dasharray 1.1s cubic-bezier(0.4,0,0.2,1)", filter: `drop-shadow(0 0 6px ${color}80)` }} />
             <text x="50%" y="50%" textAnchor="middle" dy="0.35em"
-                fill="white" fontSize={size*0.22} fontWeight="700"
-                style={{ transform: "rotate(90deg)", transformOrigin: "50% 50%" }}>
+                fill="white" fontSize={size * 0.22} fontWeight="800"
+                style={{ transform: "rotate(90deg)", transformOrigin: "50% 50%", fontFamily: "inherit" }}>
                 {score ?? "–"}
             </text>
         </svg>
@@ -149,20 +151,31 @@ function HighlightedText({ text, query }) {
         <span className="whitespace-pre-wrap">
             {parts.map((part, i) =>
                 part.toLowerCase() === query.toLowerCase()
-                    ? <mark key={i} className="bg-violet-500/30 text-violet-200 rounded px-0.5">{part}</mark>
+                    ? <mark key={i} className="rounded px-0.5" style={{ background: "rgba(139,92,246,0.35)", color: "#e9d5ff" }}>{part}</mark>
                     : part
             )}
         </span>
     );
 }
 
+/** Small stat chip used across the hero and metadata rows. */
+function StatChip({ icon: Icon, label, value, color = "#94a3b8" }) {
+    if (value == null || value === "") return null;
+    return (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl border" style={{ background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)" }}>
+            {Icon && <Icon size={13} style={{ color }} strokeWidth={2.25} />}
+            <div className="leading-tight">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">{label}</p>
+                <p className="text-xs font-bold text-slate-200">{value}</p>
+            </div>
+        </div>
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// CONVERSATION TIMELINE
+// CONVERSATION TIMELINE — logic unchanged, visuals refreshed
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Parse "MM:SS" or "HH:MM:SS" string into total seconds.
- */
 function parseTime(ts) {
     if (!ts) return 0;
     const parts = String(ts).split(":").map(Number);
@@ -177,7 +190,7 @@ const PHASE_COLORS = [
 ];
 
 /**
- * TimelinePanel — unchanged in appearance and props.
+ * TimelinePanel — unchanged props/behavior.
  */
 function TimelinePanel({ timeline, loading, error, currentSec, onSeek }) {
     const activeIdx = timeline.reduce((acc, seg, i) => {
@@ -293,17 +306,7 @@ export default function CallDetailsPage() {
     const [transcriptQuery, setTranscriptQuery] = useState("");
     const [activeTab, setActiveTab]     = useState("overview");
 
-    // ── Timeline state ─────────────────────────────────────────────────────
-    //
-    // CHANGED: timeline is no longer fetched on-demand from
-    // POST /api/calls/timeline. It is now stored in call.timeline as a JSON
-    // string (serialized by the controller from the /analyze response).
-    // We parse it once when the call record loads. If parsing fails, or the
-    // field is absent/null (e.g. a record created before this migration), we
-    // fall back to the client-side heuristic exactly as before.
-    //
-    // timelineLoading and timelineError are kept to avoid touching
-    // TimelinePanel's props interface — they are simply set once at load time.
+    // ── Timeline state (unchanged) ─────────────────────────────────────────
     const [timeline, setTimeline]           = useState([]);
     const [timelineLoading, setTimelineLoading] = useState(false);
     const [timelineError, setTimelineError] = useState(null);
@@ -317,40 +320,28 @@ export default function CallDetailsPage() {
     // ── Audio current time (lifted from AudioPlayer via callback) ──────────
     const [audioCurrentSec, setAudioCurrentSec] = useState(0);
 
+    // ── Presentation-only additions: do not affect data, routing, or API ───
+    const [copiedLink, setCopiedLink] = useState(false);
+    const [copiedTranscript, setCopiedTranscript] = useState(false);
+
     useEffect(() => {
         api.get(`/api/calls/${id}`)
             .then(r => {
                 const data = r.data;
                 setCall(data);
 
-                // ── Parse timeline from stored JSON string ─────────────────
-                //
-                // call.timeline is a TEXT column containing a JSON array string
-                // like: [{"time":"00:00","title":"Greeting"}, ...]
-                //
-                // Three possible states:
-                // 1. Valid JSON array  → use it directly
-                // 2. null / empty / "[]" → fall back to client heuristic
-                // 3. Invalid JSON       → fall back to client heuristic
-                //
-                // REMOVED: the old approach of fetching /api/calls/timeline
-                // on tab change. The timeline is now available immediately
-                // without any extra network request.
                 if (data.timeline) {
                     try {
                         const parsed = JSON.parse(data.timeline);
                         if (Array.isArray(parsed) && parsed.length > 0) {
                             setTimeline(parsed);
                         } else {
-                            // "[]" stored — fall back
                             setTimeline(buildFallbackTimeline(data.transcript));
                         }
                     } catch {
-                        // Malformed JSON — fall back
                         setTimeline(buildFallbackTimeline(data.transcript));
                     }
                 } else {
-                    // Old record without timeline column — fall back
                     setTimeline(buildFallbackTimeline(data.transcript));
                 }
             })
@@ -359,9 +350,7 @@ export default function CallDetailsPage() {
     }, [id]);
 
     /**
-     * Fallback timeline generator — works entirely in the browser when the
-     * stored timeline is absent or invalid.
-     * Kept unchanged from the original implementation.
+     * Fallback timeline generator — unchanged from the original implementation.
      */
     function buildFallbackTimeline(transcript) {
         if (!transcript) return [];
@@ -405,7 +394,7 @@ export default function CallDetailsPage() {
         return timeline;
     }
 
-    // ── Download PDF report ────────────────────────────────────────────────
+    // ── Download PDF report (unchanged) ────────────────────────────────────
     const handleDownloadReport = async () => {
         if (!call) return;
         setReportLoading(true);
@@ -420,19 +409,35 @@ export default function CallDetailsPage() {
         }
     };
 
-    // ── Tab change handler ─────────────────────────────────────────────────
-    //
-    // CHANGED: removed the call to fetchTimeline() on tab change.
-    // Timeline is already loaded from call.timeline in the useEffect above.
-    // handleTabChange is kept so the rest of the tab-switching logic is
-    // identical — no other component needs to change.
-    const handleTabChange = (tabId) => {
-        setActiveTab(tabId);
-        // OLD: if (tabId === "timeline" && call?.transcript) { fetchTimeline(call.transcript); }
-        // Timeline is now pre-loaded from call.timeline — no fetch needed.
+    // ── Presentation-only: copy the current page URL to the clipboard ──────
+    const handleCopyLink = async () => {
+        try {
+            await navigator.clipboard.writeText(window.location.href);
+            setCopiedLink(true);
+            setTimeout(() => setCopiedLink(false), 1800);
+        } catch {
+            /* clipboard unavailable — no-op */
+        }
     };
 
-    // ── Seek the AudioPlayer to a given second ─────────────────────────────
+    // ── Presentation-only: copy the raw transcript text ─────────────────────
+    const handleCopyTranscript = async () => {
+        if (!call?.transcript) return;
+        try {
+            await navigator.clipboard.writeText(call.transcript);
+            setCopiedTranscript(true);
+            setTimeout(() => setCopiedTranscript(false), 1800);
+        } catch {
+            /* clipboard unavailable — no-op */
+        }
+    };
+
+    // ── Tab change handler (unchanged) ─────────────────────────────────────
+    const handleTabChange = (tabId) => {
+        setActiveTab(tabId);
+    };
+
+    // ── Seek the AudioPlayer to a given second (unchanged) ─────────────────
     const handleTimelineSeek = (seconds) => {
         if (seekRef.current) {
             seekRef.current(seconds);
@@ -442,7 +447,7 @@ export default function CallDetailsPage() {
     if (loading) {
         return (
             <div className="min-h-screen flex items-center justify-center text-white"
-                style={{ background: "linear-gradient(135deg, #0a0a1a 0%, #0d0b2a 40%, #0a1628 100%)" }}>
+                style={{ background: "linear-gradient(160deg, #05060A 0%, #0B1020 45%, #070912 100%)" }}>
                 <div className="flex flex-col items-center gap-4">
                     <div className="w-12 h-12 border-2 border-violet-500/30 border-t-violet-400 rounded-full animate-spin" />
                     <p className="text-slate-400 text-sm">Loading call details…</p>
@@ -454,7 +459,7 @@ export default function CallDetailsPage() {
     if (error || !call) {
         return (
             <div className="min-h-screen flex items-center justify-center text-white"
-                style={{ background: "linear-gradient(135deg, #0a0a1a 0%, #0d0b2a 40%, #0a1628 100%)" }}>
+                style={{ background: "linear-gradient(160deg, #05060A 0%, #0B1020 45%, #070912 100%)" }}>
                 <div className="text-center">
                     <AlertTriangle className="w-12 h-12 mb-4 mx-auto text-amber-400" />
                     <p className="text-slate-300 mb-4">{error || "Call not found"}</p>
@@ -468,28 +473,30 @@ export default function CallDetailsPage() {
     }
 
     const sentCfg    = SENT_CONFIG[call.sentiment] || SENT_CONFIG.NEUTRAL;
+    const SentIcon   = sentCfg.icon;
     const strengths  = parseList(call.strengths);
     const improvements = parseList(call.improvements);
     const keywords   = parseList(call.keywords);
     const insights   = parseInsights(call.insights);
+    const outcomeCfg = call.outcomeStatus ? (OUTCOME_CONFIG[call.outcomeStatus] || OUTCOME_FALLBACK) : null;
 
     const TABS = [
-        { id: "overview",    label: "Overview",   icon: ClipboardList },
-        { id: "transcript",  label: "Transcript", icon: FileText },
-        { id: "timeline",    label: "Timeline",   icon: Clock },
-        { id: "scores",      label: "Scores",     icon: BarChart3 },
+        { id: "overview",    label: "Overview",   icon: ClipboardList, tone: "#8b5cf6" },
+        { id: "transcript",  label: "Transcript", icon: FileText,      tone: "#3b82f6" },
+        { id: "timeline",    label: "Timeline",   icon: Clock,         tone: "#06b6d4" },
+        { id: "scores",      label: "Analytics",  icon: BarChart3,     tone: "#10b981" },
     ];
 
     return (
         <div className="min-h-screen text-white"
-            style={{ background: "linear-gradient(135deg, #0a0a1a 0%, #0d0b2a 40%, #0a1628 100%)" }}>
+            style={{ background: "linear-gradient(160deg, #05060A 0%, #0B1020 45%, #070912 100%)" }}>
 
             <div className="fixed inset-0 pointer-events-none opacity-[0.025]"
                 style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")" }} />
 
             {/* ── NAV ── */}
             <header className="sticky top-0 z-40 border-b border-white/8 backdrop-blur-xl"
-                style={{ background: "rgba(10,10,26,0.88)" }}>
+                style={{ background: "rgba(5,6,10,0.82)" }}>
                 <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center gap-4">
                     <Link to="/dashboard" className="flex items-center gap-2.5 flex-shrink-0 mr-2">
                         <img src={logo} alt="Convexa AI" className="h-7 w-auto" />
@@ -501,41 +508,45 @@ export default function CallDetailsPage() {
 
                     <div className="hidden sm:flex items-center gap-2 text-sm text-slate-500 min-w-0 flex-1">
                         <Link to="/dashboard" className="hover:text-violet-400 transition-colors">Dashboard</Link>
-                        <span>/</span>
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-700" />
                         <Link to="/history" className="hover:text-violet-400 transition-colors">History</Link>
-                        <span>/</span>
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-700" />
                         <span className="text-slate-300 truncate max-w-[120px] sm:max-w-[160px] md:max-w-xs">{call.fileName}</span>
                     </div>
 
-                    <div className="ml-auto flex items-center gap-3">
+                    <div className="ml-auto flex items-center gap-2">
+                        <button
+                            onClick={handleCopyLink}
+                            title="Copy link to this call"
+                            className="hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all
+                                border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 active:scale-95">
+                            {copiedLink ? <CopyCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Share2 className="w-3.5 h-3.5" />}
+                            <span className="hidden md:inline">{copiedLink ? "Link copied" : "Share"}</span>
+                        </button>
+
                         <button
                             onClick={handleDownloadReport}
                             disabled={reportLoading}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all
-                                border border-white/10 bg-white/5
-                                hover:bg-white/10 hover:border-white/20
-                                disabled:opacity-50 disabled:cursor-not-allowed active:scale-95`}>
+                            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all active:scale-95
+                                disabled:opacity-50 disabled:cursor-not-allowed"
+                            style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)", boxShadow: "0 2px 16px rgba(124,58,237,0.3)" }}>
                             {reportLoading ? (
                                 <>
-                                    <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                                     <span className="hidden sm:inline">Generating…</span>
                                 </>
                             ) : (
                                 <>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                        <polyline points="7 10 12 15 17 10"/>
-                                        <line x1="12" y1="15" x2="12" y2="3"/>
-                                    </svg>
-                                    <span className="hidden sm:inline">Download Report</span>
+                                    <Download className="w-3.5 h-3.5" />
+                                    <span className="hidden sm:inline">Export PDF</span>
                                 </>
                             )}
                         </button>
 
                         <button onClick={() => navigate(-1)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm text-slate-400
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm text-slate-400
                                 hover:text-white hover:bg-white/8 border border-white/8 transition-all">
-                            <ArrowLeft className="w-3.5 h-3.5" /> Back
+                            <ArrowLeft className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Back</span>
                         </button>
                     </div>
                 </div>
@@ -543,65 +554,122 @@ export default function CallDetailsPage() {
 
             <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 
-                {/* ── HERO ROW ── */}
-                <div className="flex flex-col md:flex-row items-start md:items-center gap-5 p-6 rounded-3xl border border-white/10"
-                    style={{ background: "linear-gradient(135deg, rgba(139,92,246,0.12) 0%, rgba(59,130,246,0.07) 100%)" }}>
-                    <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-2">
-                            <span className="text-xs font-bold px-2.5 py-1 rounded-full"
-                                style={{ background: "rgba(139,92,246,0.15)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.25)" }}>
-                                Call Details
-                            </span>
-                            {call.sentiment && (
-                                <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full"
-                                    style={{ background: sentCfg.bg, color: sentCfg.color, border: `1px solid ${sentCfg.border}` }}>
-                                    <sentCfg.icon className="w-3.5 h-3.5" /> {sentCfg.label}
-                                </span>
-                            )}
-                        </div>
-                        <h1 className="text-xl md:text-2xl font-black text-white truncate">{call.fileName}</h1>
-                        <p className="text-sm text-slate-400 mt-1">
-                            {call.createdAt
-                                ? new Date(call.createdAt).toLocaleString("en-US", {
-                                    weekday: "long", year: "numeric", month: "long",
-                                    day: "numeric", hour: "2-digit", minute: "2-digit",
-                                  })
-                                : "Unknown date"}
-                        </p>
-                    </div>
+                {/* ── HERO ── */}
+                <div className="relative overflow-hidden rounded-3xl border border-white/10 p-6 sm:p-7"
+                    style={{ background: "linear-gradient(135deg, rgba(139,92,246,0.14) 0%, rgba(59,130,246,0.08) 55%, rgba(6,182,212,0.06) 100%)" }}>
+                    <div className="absolute -top-24 -right-24 w-64 h-64 rounded-full blur-3xl pointer-events-none"
+                        style={{ background: "radial-gradient(circle, rgba(139,92,246,0.25) 0%, transparent 70%)" }} />
 
-                    {call.overallScore != null && (
-                        <div className="flex items-center gap-4 flex-shrink-0">
-                            <div className="flex flex-col items-center">
-                                <ScoreRing score={call.overallScore} size={80} stroke={6} color="#8b5cf6" />
-                                <p className="text-xs text-slate-400 mt-1 font-medium">Overall Score</p>
+                    <div className="relative flex flex-col lg:flex-row lg:items-center gap-6">
+                        <div className="flex items-start gap-4 min-w-0 flex-1">
+                            <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-lg font-black text-white flex-shrink-0"
+                                style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)", boxShadow: "0 8px 24px rgba(124,58,237,0.35)" }}>
+                                {call.fileName?.[0]?.toUpperCase() ?? "C"}
+                            </div>
+
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                    <span className="text-xs font-bold px-2.5 py-1 rounded-full"
+                                        style={{ background: "rgba(139,92,246,0.15)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.25)" }}>
+                                        Call Command Center
+                                    </span>
+                                    {call.sentiment && (
+                                        <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full"
+                                            style={{ background: sentCfg.bg, color: sentCfg.color, border: `1px solid ${sentCfg.border}` }}>
+                                            <SentIcon className="w-3.5 h-3.5" /> {sentCfg.label}
+                                        </span>
+                                    )}
+                                    {outcomeCfg && call.outcomeStatus && (
+                                        <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full"
+                                            style={{ background: outcomeCfg.bg, color: outcomeCfg.color, border: `1px solid ${outcomeCfg.border}` }}>
+                                            <outcomeCfg.icon className="w-3.5 h-3.5" /> {call.outcomeStatus}
+                                        </span>
+                                    )}
+                                </div>
+                                <h1 className="text-xl md:text-2xl font-black text-white truncate">{call.fileName}</h1>
+                                <p className="text-sm text-slate-400 mt-1">
+                                    {call.createdAt
+                                        ? new Date(call.createdAt).toLocaleString("en-US", {
+                                            weekday: "long", year: "numeric", month: "long",
+                                            day: "numeric", hour: "2-digit", minute: "2-digit",
+                                          })
+                                        : "Unknown date"}
+                                </p>
+
+                                <div className="flex flex-wrap gap-2 mt-3.5">
+                                    <StatChip icon={Phone} label="Call Type" value={call.callType} color="#60a5fa" />
+                                    {call.buyingIntent && (
+                                        <div className="flex items-center gap-2 px-3 py-2 rounded-xl border"
+                                            style={{ background: (INTENT_CONFIG[call.buyingIntent] || INTENT_FALLBACK).bg, borderColor: (INTENT_CONFIG[call.buyingIntent] || INTENT_FALLBACK).border }}>
+                                            <Lightbulb size={13} style={{ color: (INTENT_CONFIG[call.buyingIntent] || INTENT_FALLBACK).color }} />
+                                            <div className="leading-tight">
+                                                <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Buying Intent</p>
+                                                <p className="text-xs font-bold" style={{ color: (INTENT_CONFIG[call.buyingIntent] || INTENT_FALLBACK).color }}>{call.buyingIntent}</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {call.confidence != null && (
+                                        <StatChip icon={Target} label="AI Confidence" value={`${Math.max(0, Math.min(100, call.confidence))}%`}
+                                            color={call.confidence >= 80 ? "#34d399" : call.confidence >= 50 ? "#fbbf24" : "#f87171"} />
+                                    )}
+                                </div>
                             </div>
                         </div>
-                    )}
+
+                        {call.overallScore != null && (
+                            <div className="flex items-center gap-4 flex-shrink-0 lg:pl-6 lg:border-l lg:border-white/10">
+                                <div className="flex flex-col items-center">
+                                    <ScoreRing score={call.overallScore} size={84} stroke={6} color="#8b5cf6" />
+                                    <p className="text-xs text-slate-400 mt-1.5 font-semibold">Overall Score</p>
+                                </div>
+                                <button
+                                    title="Re-analyze this call (coming soon)"
+                                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all
+                                        border border-white/10 bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 cursor-default">
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                    <span className="hidden sm:inline">Re-analyze</span>
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
-                <AudioPlayerWithBridge
-                    cloudinaryUrl={call.cloudinaryUrl}
-                    fileName={call.fileName}
-                    seekRef={seekRef}
-                    onTimeUpdate={setAudioCurrentSec}
-                />
+                {/* ── AUDIO PLAYER ── */}
+                <div className="rounded-2xl border border-white/10 p-4 sm:p-5" style={{ background: "rgba(255,255,255,0.03)" }}>
+                    <div className="flex items-center gap-2 mb-3">
+                        <SectionLabel icon={Radio} tone="#06b6d4">Call Recording</SectionLabel>
+                    </div>
+                    <AudioPlayerWithBridge
+                        cloudinaryUrl={call.cloudinaryUrl}
+                        fileName={call.fileName}
+                        seekRef={seekRef}
+                        onTimeUpdate={setAudioCurrentSec}
+                    />
+                </div>
 
                 {/* ── TABS ── */}
                 <div className="overflow-x-auto pb-1 -mb-1">
-                    <div className="flex gap-1 p-1 rounded-2xl border border-white/8 bg-white/3 w-fit min-w-full sm:min-w-0">
-                        {TABS.map(tab => (
-                            <button key={tab.id} onClick={() => handleTabChange(tab.id)}
-                                className={`px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap flex-shrink-0
-                                    ${activeTab === tab.id
-                                        ? "bg-white/12 text-white shadow"
-                                        : "text-slate-400 hover:text-white hover:bg-white/5"}`}>
-                                <span className="inline-flex items-center gap-1.5">
-                                    <tab.icon className="w-3.5 h-3.5" />
-                                    {tab.label}
-                                </span>
-                            </button>
-                        ))}
+                    <div className="flex gap-1 p-1 rounded-2xl border border-white/8 bg-white/3 w-fit min-w-full sm:min-w-0 backdrop-blur-xl">
+                        {TABS.map(tab => {
+                            const active = activeTab === tab.id;
+                            return (
+                                <button key={tab.id} onClick={() => handleTabChange(tab.id)}
+                                    className="relative px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap flex-shrink-0"
+                                    style={{
+                                        color: active ? "#fff" : "#94a3b8",
+                                        background: active ? "rgba(255,255,255,0.1)" : "transparent",
+                                    }}>
+                                    <span className="inline-flex items-center gap-1.5">
+                                        <tab.icon className="w-3.5 h-3.5" style={{ color: active ? tab.tone : undefined }} />
+                                        {tab.label}
+                                    </span>
+                                    {active && (
+                                        <span className="absolute left-3 right-3 -bottom-[3px] h-[2px] rounded-full"
+                                            style={{ background: tab.tone, boxShadow: `0 0 8px ${tab.tone}` }} />
+                                    )}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
 
@@ -609,22 +677,35 @@ export default function CallDetailsPage() {
                 {activeTab === "overview" && (
                     <div className="space-y-5">
                         {call.summary && (
-                            <div className="p-5 rounded-2xl border border-violet-500/20 bg-violet-500/5">
-                                <p className="text-xs font-bold text-violet-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                                    <ClipboardList className="w-3.5 h-3.5" /> AI Summary
-                                </p>
-                                <p className="text-sm text-slate-300 leading-relaxed">{call.summary}</p>
-                            </div>
+                            <GlassCard tone="rgba(139,92,246,0.25)" bg="linear-gradient(135deg, rgba(139,92,246,0.1), rgba(59,130,246,0.05))" className="p-5">
+                                <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full blur-2xl pointer-events-none"
+                                    style={{ background: "radial-gradient(circle, rgba(139,92,246,0.25) 0%, transparent 70%)" }} />
+                                <div className="relative flex items-start gap-3">
+                                    <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                                        style={{ background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.3)" }}>
+                                        <Brain className="w-4 h-4 text-violet-300" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <SectionLabel icon={Sparkles} tone="#a78bfa">AI Executive Summary</SectionLabel>
+                                        <p className="text-sm text-slate-200 leading-relaxed mt-3">{call.summary}</p>
+                                    </div>
+                                </div>
+                            </GlassCard>
                         )}
 
-                        {/* ── DEAL INTELLIGENCE: outcome / metadata / confidence ── */}
+                        {/* ── DEAL INTELLIGENCE ── */}
                         {(call.outcomeStatus || call.callType || call.buyingIntent || call.confidence != null) && (
-                            <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                                <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 flex-wrap">
+                            <GlassCard className="p-5">
+                                <SectionLabel icon={FileBarChart} tone="#60a5fa">Deal Intelligence</SectionLabel>
+                                <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 flex-wrap mt-4">
                                     {call.outcomeStatus && (
                                         <div>
                                             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Outcome</p>
-                                            <OutcomeStatusBadge status={call.outcomeStatus} />
+                                            <span className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border"
+                                                style={{ background: outcomeCfg.bg, color: outcomeCfg.color, borderColor: outcomeCfg.border }}>
+                                                <outcomeCfg.icon className="w-3.5 h-3.5" strokeWidth={2.5} />
+                                                {call.outcomeStatus}
+                                            </span>
                                         </div>
                                     )}
 
@@ -658,11 +739,22 @@ export default function CallDetailsPage() {
 
                                     {call.confidence != null && (
                                         <div className="flex-1 min-w-[180px] sm:max-w-xs sm:ml-auto">
-                                            <ConfidenceBar confidence={call.confidence} />
+                                            <div className="flex items-center justify-between mb-2">
+                                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                                                    <Target className="w-3.5 h-3.5" /> AI Confidence
+                                                </p>
+                                                <span className="text-xs font-bold" style={{ color: call.confidence >= 80 ? "#10b981" : call.confidence >= 50 ? "#f59e0b" : "#ef4444" }}>
+                                                    {Math.max(0, Math.min(100, call.confidence))}%
+                                                </span>
+                                            </div>
+                                            <div className="w-full h-2 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }}>
+                                                <div className="h-2 rounded-full transition-all duration-700"
+                                                    style={{ width: `${Math.max(0, Math.min(100, call.confidence))}%`, background: call.confidence >= 80 ? "#10b981" : call.confidence >= 50 ? "#f59e0b" : "#ef4444" }} />
+                                            </div>
                                         </div>
                                     )}
                                 </div>
-                            </div>
+                            </GlassCard>
                         )}
 
                         {/* ── ACTION ITEMS + RISK FLAGS ── */}
@@ -673,13 +765,10 @@ export default function CallDetailsPage() {
 
                             return (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                    {/* Action items — read-only checklist */}
                                     {actionItems.length > 0 && (
-                                        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                                                <CheckSquare className="w-3.5 h-3.5" /> Action Items
-                                            </p>
-                                            <ul className="space-y-2.5">
+                                        <GlassCard className="p-5">
+                                            <SectionLabel icon={CheckSquare} tone="#a1a1aa">Action Items</SectionLabel>
+                                            <ul className="space-y-2.5 mt-4">
                                                 {actionItems.map((item, i) => {
                                                     const title     = typeof item === "string" ? item : item?.title;
                                                     const completed = typeof item === "object" && !!item?.completed;
@@ -698,16 +787,13 @@ export default function CallDetailsPage() {
                                                     );
                                                 })}
                                             </ul>
-                                        </div>
+                                        </GlassCard>
                                     )}
 
-                                    {/* Risk flags — amber warning cards, elegant empty state */}
-                                    <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5">
-                                        <p className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                                            <Flag className="w-3.5 h-3.5" /> Risk Flags
-                                        </p>
+                                    <GlassCard tone="rgba(245,158,11,0.2)" bg="rgba(245,158,11,0.05)" className="p-5">
+                                        <SectionLabel icon={Flag} tone="#fbbf24">Risk Flags</SectionLabel>
                                         {riskFlags.length > 0 ? (
-                                            <ul className="space-y-2.5">
+                                            <ul className="space-y-2.5 mt-4">
                                                 {riskFlags.map((flag, i) => {
                                                     const severity = typeof flag === "object" ? flag?.severity : null;
                                                     const message  = typeof flag === "string" ? flag : flag?.message;
@@ -729,12 +815,12 @@ export default function CallDetailsPage() {
                                                 })}
                                             </ul>
                                         ) : (
-                                            <div className="flex items-center gap-2.5 py-4 text-slate-500 text-sm">
+                                            <div className="flex items-center gap-2.5 py-4 text-slate-500 text-sm mt-2">
                                                 <CheckCircle className="text-emerald-400 w-4 h-4" />
                                                 <span>No active risks detected.</span>
                                             </div>
                                         )}
-                                    </div>
+                                    </GlassCard>
                                 </div>
                             );
                         })()}
@@ -744,11 +830,9 @@ export default function CallDetailsPage() {
                             const suggestions = parseJSONArray(call.followUpSuggestions);
                             if (suggestions.length === 0) return null;
                             return (
-                                <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5">
-                                    <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                                        <Lightbulb className="w-3.5 h-3.5" /> Follow-Up Suggestions
-                                    </p>
-                                    <div className="space-y-2.5">
+                                <GlassCard tone="rgba(59,130,246,0.2)" bg="rgba(59,130,246,0.05)" className="p-5">
+                                    <SectionLabel icon={Lightbulb} tone="#60a5fa">Follow-Up Suggestions</SectionLabel>
+                                    <div className="space-y-2.5 mt-4">
                                         {suggestions.map((s, i) => (
                                             <div key={i} className="flex items-start gap-3 p-3.5 rounded-xl border border-blue-500/15 bg-blue-500/5">
                                                 <Lightbulb className="flex-shrink-0 mt-0.5 w-4 h-4 text-blue-400" />
@@ -756,7 +840,7 @@ export default function CallDetailsPage() {
                                             </div>
                                         ))}
                                     </div>
-                                </div>
+                                </GlassCard>
                             );
                         })()}
 
@@ -769,11 +853,9 @@ export default function CallDetailsPage() {
                             return (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                     {buyingSignals.length > 0 && (
-                                        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
-                                            <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                                                <TrendingUp className="w-3.5 h-3.5" /> Buying Signals
-                                            </p>
-                                            <div className="flex flex-wrap gap-2">
+                                        <GlassCard tone="rgba(16,185,129,0.2)" bg="rgba(16,185,129,0.05)" className="p-5">
+                                            <SectionLabel icon={TrendingUp} tone="#34d399">Buying Signals</SectionLabel>
+                                            <div className="flex flex-wrap gap-2 mt-4">
                                                 {buyingSignals.map((sig, i) => (
                                                     <span key={i}
                                                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border"
@@ -783,15 +865,13 @@ export default function CallDetailsPage() {
                                                     </span>
                                                 ))}
                                             </div>
-                                        </div>
+                                        </GlassCard>
                                     )}
 
                                     {objections.length > 0 && (
-                                        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                                                <MessageSquare className="w-3.5 h-3.5" /> Objections
-                                            </p>
-                                            <ul className="space-y-2.5">
+                                        <GlassCard className="p-5">
+                                            <SectionLabel icon={MessageSquare} tone="#a1a1aa">Objections</SectionLabel>
+                                            <ul className="space-y-2.5 mt-4">
                                                 {objections.map((obj, i) => {
                                                     const text     = typeof obj === "string" ? obj : obj?.objection;
                                                     const resolved = typeof obj === "object" && !!obj?.resolved;
@@ -810,7 +890,7 @@ export default function CallDetailsPage() {
                                                     );
                                                 })}
                                             </ul>
-                                        </div>
+                                        </GlassCard>
                                     )}
                                 </div>
                             );
@@ -819,11 +899,9 @@ export default function CallDetailsPage() {
                         {(strengths.length > 0 || improvements.length > 0) && (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                 {strengths.length > 0 && (
-                                    <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
-                                        <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                                            <CheckCircle2 className="w-3.5 h-3.5" /> Strengths
-                                        </p>
-                                        <ul className="space-y-2.5">
+                                    <GlassCard tone="rgba(16,185,129,0.2)" bg="rgba(16,185,129,0.05)" className="p-5">
+                                        <SectionLabel icon={CheckCircle2} tone="#34d399">Strengths</SectionLabel>
+                                        <ul className="space-y-2.5 mt-4">
                                             {strengths.map((s, i) => (
                                                 <li key={i} className="flex items-start gap-2.5">
                                                     <span className="mt-0.5 w-5 h-5 rounded-full bg-emerald-500/20 flex-shrink-0
@@ -832,34 +910,32 @@ export default function CallDetailsPage() {
                                                 </li>
                                             ))}
                                         </ul>
-                                    </div>
+                                    </GlassCard>
                                 )}
                                 {improvements.length > 0 && (
-                                    <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5">
-                                        <p className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                                            <Zap className="w-3.5 h-3.5" /> Improvements
-                                        </p>
-                                        <ul className="space-y-2.5">
+                                    <GlassCard tone="rgba(245,158,11,0.2)" bg="rgba(245,158,11,0.05)" className="p-5">
+                                        <SectionLabel icon={Zap} tone="#fbbf24">Improvements</SectionLabel>
+                                        <ul className="space-y-2.5 mt-4">
                                             {improvements.map((s, i) => (
                                                 <li key={i} className="flex items-start gap-2.5">
                                                     <span className="mt-0.5 w-5 h-5 rounded-full bg-amber-500/20 flex-shrink-0
-                                                        flex items-center justify-center text-amber-400 text-xs font-bold">!</span>
+                                                        flex items-center justify-center text-amber-400 text-xs font-bold">
+                                                        <AlertOctagon className="w-3 h-3" />
+                                                    </span>
                                                     <span className="text-sm text-slate-300 leading-snug">{s}</span>
                                                 </li>
                                             ))}
                                         </ul>
-                                    </div>
+                                    </GlassCard>
                                 )}
                             </div>
                         )}
 
                         {insights.length > 0 && (
-                            <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5">
-                                <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                                    <Brain className="w-3.5 h-3.5" /> AI Insights
-                                </p>
+                            <GlassCard tone="rgba(59,130,246,0.2)" bg="rgba(59,130,246,0.05)" className="p-5">
+                                <SectionLabel icon={Brain} tone="#60a5fa">AI Insights</SectionLabel>
                                 {insights[0]?.bullets ? (
-                                    <ul className="space-y-2.5">
+                                    <ul className="space-y-2.5 mt-4">
                                         {insights[0].bullets.map((line, i) => (
                                             <li key={i} className="flex items-start gap-2.5">
                                                 <span className="mt-2 w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
@@ -868,32 +944,36 @@ export default function CallDetailsPage() {
                                         ))}
                                     </ul>
                                 ) : (
-                                    <div className="space-y-2.5">
-                                        {insights.map(section => (
-                                            <div key={section.key}
-                                                className="flex items-start gap-3 p-3.5 rounded-xl border"
-                                                style={{ background: section.bg, borderColor: section.border }}>
-                                                <span className="text-lg flex-shrink-0 mt-0.5">{section.emoji}</span>
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-xs font-bold uppercase tracking-wide mb-1"
-                                                        style={{ color: section.color }}>{section.label}</p>
-                                                    <p className="text-sm text-slate-300 leading-relaxed">
-                                                        {section.value || <span className="text-slate-600 italic">—</span>}
-                                                    </p>
+                                    <div className="space-y-2.5 mt-4">
+                                        {insights.map(section => {
+                                            const Icon = insightIcon(section.key);
+                                            return (
+                                                <div key={section.key}
+                                                    className="flex items-start gap-3 p-3.5 rounded-xl border"
+                                                    style={{ background: section.bg, borderColor: section.border }}>
+                                                    <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+                                                        style={{ background: `${section.color}22`, border: `1px solid ${section.color}45` }}>
+                                                        <Icon className="w-3.5 h-3.5" style={{ color: section.color }} />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-xs font-bold uppercase tracking-wide mb-1"
+                                                            style={{ color: section.color }}>{section.label}</p>
+                                                        <p className="text-sm text-slate-300 leading-relaxed">
+                                                            {section.value || <span className="text-slate-600 italic">—</span>}
+                                                        </p>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 )}
-                            </div>
+                            </GlassCard>
                         )}
 
                         {keywords.length > 0 && (
-                            <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                                    <KeyRound className="w-3.5 h-3.5" /> Keywords
-                                </p>
-                                <div className="flex flex-wrap gap-2">
+                            <GlassCard className="p-5">
+                                <SectionLabel icon={KeyRound} tone="#a1a1aa">Keywords</SectionLabel>
+                                <div className="flex flex-wrap gap-2 mt-4">
                                     {keywords.map((kw, i) => (
                                         <span key={i}
                                             className="px-3 py-1.5 rounded-full text-xs font-semibold border transition-all hover:scale-105 cursor-default"
@@ -902,25 +982,24 @@ export default function CallDetailsPage() {
                                         </span>
                                     ))}
                                 </div>
-                            </div>
+                            </GlassCard>
                         )}
                     </div>
                 )}
 
                 {/* ── TRANSCRIPT TAB ── */}
                 {activeTab === "transcript" && (
-                    <div className="rounded-2xl border border-white/10 bg-white/5">
+                    <GlassCard>
                         <div className="flex items-center gap-3 px-5 pt-5 pb-3 border-b border-white/8">
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex-shrink-0 flex items-center gap-1.5">
-                                <FileText className="w-3.5 h-3.5" /> Transcript
-                            </p>
+                            <SectionLabel icon={FileText} tone="#60a5fa">Transcript</SectionLabel>
                             <div className="flex-1 relative">
+                                <Search className="w-3.5 h-3.5 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
                                 <input
                                     type="text"
                                     placeholder="Search transcript…"
                                     value={transcriptQuery}
                                     onChange={e => setTranscriptQuery(e.target.value)}
-                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-9 py-2 text-sm text-white
                                         placeholder-slate-600 focus:outline-none focus:border-violet-500/40 focus:bg-white/8 transition-all"
                                 />
                                 {transcriptQuery && (
@@ -930,6 +1009,13 @@ export default function CallDetailsPage() {
                                     </button>
                                 )}
                             </div>
+                            <button onClick={handleCopyTranscript} disabled={!call.transcript}
+                                title="Copy transcript"
+                                className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all
+                                    border border-white/10 bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-40">
+                                {copiedTranscript ? <CopyCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                                <span className="hidden sm:inline">{copiedTranscript ? "Copied" : "Copy"}</span>
+                            </button>
                         </div>
                         <div className="p-5 max-h-[60vh] overflow-y-auto text-sm text-slate-300 leading-relaxed font-mono"
                             style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(139,92,246,0.4) transparent" }}>
@@ -937,17 +1023,15 @@ export default function CallDetailsPage() {
                                 ? <HighlightedText text={call.transcript} query={transcriptQuery} />
                                 : <span className="text-slate-500 italic">No transcript available</span>}
                         </div>
-                    </div>
+                    </GlassCard>
                 )}
 
                 {/* ── TIMELINE TAB ── */}
                 {activeTab === "timeline" && (
                     <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-                        <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-white/5 p-5">
+                        <GlassCard className="lg:col-span-2 p-5">
                             <div className="flex items-center justify-between mb-4">
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                                    <Clock className="w-3.5 h-3.5" /> Conversation Timeline
-                                </p>
+                                <SectionLabel icon={Clock} tone="#22d3ee">Conversation Timeline</SectionLabel>
                                 {timeline.length > 0 && (
                                     <span className="text-xs text-violet-400 font-bold px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-500/20">
                                         {timeline.length} phases
@@ -961,53 +1045,58 @@ export default function CallDetailsPage() {
                                 currentSec={audioCurrentSec}
                                 onSeek={handleTimelineSeek}
                             />
-                        </div>
+                        </GlassCard>
 
-                        <div className="lg:col-span-3 rounded-2xl border border-white/10 bg-white/5 p-5">
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                                <ClipboardList className="w-3.5 h-3.5" /> Transcript at Selected Phase
-                            </p>
-                            {timeline.length > 0 ? (
-                                <PhaseTranscript
-                                    transcript={call.transcript}
-                                    timeline={timeline}
-                                    currentSec={audioCurrentSec}
-                                />
-                            ) : (
-                                <div className="flex flex-col items-center justify-center h-40 text-slate-500 text-sm gap-2">
-                                    <Clock className="w-8 h-8" />
-                                    <span>Select a phase from the timeline</span>
-                                </div>
-                            )}
-                        </div>
+                        <GlassCard className="lg:col-span-3 p-5">
+                            <SectionLabel icon={ClipboardList} tone="#a1a1aa">Transcript at Selected Phase</SectionLabel>
+                            <div className="mt-4">
+                                {timeline.length > 0 ? (
+                                    <PhaseTranscript
+                                        transcript={call.transcript}
+                                        timeline={timeline}
+                                        currentSec={audioCurrentSec}
+                                    />
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center h-40 text-slate-500 text-sm gap-2">
+                                        <Clock className="w-8 h-8" />
+                                        <span>Select a phase from the timeline</span>
+                                    </div>
+                                )}
+                            </div>
+                        </GlassCard>
                     </div>
                 )}
 
-                {/* ── SCORES TAB ── */}
+                {/* ── SCORES / ANALYTICS TAB ── */}
                 {activeTab === "scores" && (
                     <div className="space-y-5">
                         {call.overallScore != null && (
-                            <div className="flex flex-col sm:flex-row items-center gap-6 p-6 rounded-2xl border border-violet-500/20 bg-violet-500/5">
-                                <ScoreRing score={call.overallScore} size={100} stroke={8} color="#8b5cf6" />
-                                <div>
-                                    <p className="text-2xl font-black text-white">{call.overallScore} / 100</p>
-                                    <p className="text-slate-400 text-sm mt-1">Overall Conversation Quality</p>
-                                    <div className="w-full max-w-xs h-2 rounded-full mt-3" style={{ background: "rgba(255,255,255,0.1)" }}>
-                                        <div className="h-2 rounded-full bg-gradient-to-r from-violet-500 to-blue-500 transition-all duration-700"
-                                            style={{ width: `${call.overallScore}%` }} />
+                            <GlassCard tone="rgba(139,92,246,0.25)" bg="rgba(139,92,246,0.06)" className="p-6">
+                                <div className="flex flex-col sm:flex-row items-center gap-6">
+                                    <ScoreRing score={call.overallScore} size={100} stroke={8} color="#8b5cf6" />
+                                    <div className="flex-1">
+                                        <p className="text-2xl font-black text-white">{call.overallScore} / 100</p>
+                                        <p className="text-slate-400 text-sm mt-1">Overall Conversation Quality</p>
+                                        <div className="w-full max-w-xs h-2 rounded-full mt-3" style={{ background: "rgba(255,255,255,0.1)" }}>
+                                            <div className="h-2 rounded-full bg-gradient-to-r from-violet-500 to-blue-500 transition-all duration-700"
+                                                style={{ width: `${call.overallScore}%` }} />
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
+                            </GlassCard>
                         )}
 
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             {[
-                                { label: "Communication",      key: "communication",       color: "#8b5cf6" },
-                                { label: "Problem Resolution", key: "problemResolution",   color: "#3b82f6" },
-                                { label: "Professionalism",    key: "professionalism",     color: "#10b981" },
-                                { label: "Cust. Satisfaction", key: "customerSatisfaction",color: "#f59e0b" },
-                            ].map(({ label, key, color }) => (
-                                <div key={key} className="flex flex-col items-center gap-3 p-5 rounded-2xl bg-white/4 border border-white/8 hover:border-white/15 transition-all">
+                                { label: "Communication",      key: "communication",       color: "#8b5cf6", icon: MessageSquare },
+                                { label: "Problem Resolution", key: "problemResolution",   color: "#3b82f6", icon: CheckSquare },
+                                { label: "Professionalism",    key: "professionalism",     color: "#10b981", icon: ThumbsUp },
+                                { label: "Cust. Satisfaction", key: "customerSatisfaction",color: "#f59e0b", icon: Smile },
+                            ].map(({ label, key, color, icon: Icon }) => (
+                                <div key={key} className="group flex flex-col items-center gap-3 p-5 rounded-2xl bg-white/4 border border-white/8 hover:border-white/15 transition-all">
+                                    <div className="flex items-center gap-1.5 self-start">
+                                        <Icon className="w-3.5 h-3.5" style={{ color }} />
+                                    </div>
                                     <ScoreRing score={call[key]} size={76} stroke={6} color={color} />
                                     <div className="text-center">
                                         <p className="text-xs text-slate-400 font-medium leading-tight">{label}</p>
@@ -1022,9 +1111,9 @@ export default function CallDetailsPage() {
                             ))}
                         </div>
 
-                        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Score Breakdown</p>
-                            <div className="space-y-3">
+                        <GlassCard className="p-5">
+                            <SectionLabel icon={Gauge} tone="#a1a1aa">Score Breakdown</SectionLabel>
+                            <div className="space-y-3 mt-4">
                                 {[
                                     { label: "Overall",               val: call.overallScore,         color: "#8b5cf6" },
                                     { label: "Communication",         val: call.communication,        color: "#8b5cf6" },
@@ -1042,7 +1131,7 @@ export default function CallDetailsPage() {
                                     </div>
                                 ))}
                             </div>
-                        </div>
+                        </GlassCard>
                     </div>
                 )}
             </main>
