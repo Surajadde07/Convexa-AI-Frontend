@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { parseInsights } from "../utils/insightsFormatter.js";
 import {
     PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
@@ -23,6 +23,7 @@ import {
     Sun, Moon, MoreHorizontal,
     Crown, Medal, Award,
     Info, AlertOctagon, PlayCircle, ArrowUp, ArrowDown,
+    Check, CheckCheck, Inbox, RotateCcw, ListFilter, ArrowDownAZ,
 } from "lucide-react";
 
 
@@ -866,11 +867,35 @@ export default function DashboardPage() {
     const [themeMode, setThemeMode] = useState("dark");
     const [searchQuery, setSearchQuery] = useState("");
     const [searchOpen, setSearchOpen] = useState(false);
+    const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
     const [dateRange, setDateRange] = useState("30d"); // 7d | 30d | all — filters the local `calls` array only
     const [chartGranularity, setChartGranularity] = useState("Daily"); // Daily | Weekly
+
+    /* ── Filter popover state. `filters` only narrows the already-fetched
+       `calls` array (same client-side pattern as `dateRange`) — no new
+       endpoints, no fabricated fields. Options for outcomeStatus/callType
+       are derived from real data further down, never hard-coded guesses. */
+    const [filterOpen, setFilterOpen] = useState(false);
+    const [filters, setFilters] = useState({
+        sentiment: "all",
+        qaScore: "all",
+        outcomeStatus: "all",
+        callType: "all",
+        sortBy: "newest",
+    });
+
+    /* ── Notification panel state. Notifications are derived from the real
+       `calls` array (below) — read/unread is the only bit of local state. */
+    const [notifOpen, setNotifOpen] = useState(false);
+    const [readNotifIds, setReadNotifIds] = useState(() => new Set());
+
     const T = THEMES[themeMode];
     const location = useLocation();
+    const navigate = useNavigate();
     const searchInputRef = useRef(null);
+    const searchWrapRef = useRef(null);
+    const filterWrapRef = useRef(null);
+    const notifWrapRef = useRef(null);
 
     const user = getUser();
     const firstName = user?.name?.split(" ")[0] ?? "there";
@@ -899,6 +924,19 @@ export default function DashboardPage() {
         return () => window.removeEventListener("click", handler);
     }, [profileOpen]);
 
+    /* ── Click-outside for search / filter / notifications — each panel
+       closes only when the click lands outside its own wrapper, so clicking
+       a search result or a filter control never immediately closes it. */
+    useEffect(() => {
+        const handler = (e) => {
+            if (searchOpen && searchWrapRef.current && !searchWrapRef.current.contains(e.target)) setSearchOpen(false);
+            if (filterOpen && filterWrapRef.current && !filterWrapRef.current.contains(e.target)) setFilterOpen(false);
+            if (notifOpen && notifWrapRef.current && !notifWrapRef.current.contains(e.target)) setNotifOpen(false);
+        };
+        if (searchOpen || filterOpen || notifOpen) document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, [searchOpen, filterOpen, notifOpen]);
+
     useEffect(() => {
         const onKey = (e) => { if (e.key === "Escape") setMobileMenuOpen(false); };
         if (mobileMenuOpen) {
@@ -921,11 +959,38 @@ export default function DashboardPage() {
                 setSearchOpen(true);
                 setTimeout(() => searchInputRef.current?.focus(), 10);
             }
-            if (e.key === "Escape") setSearchOpen(false);
+            if (e.key === "Escape") {
+                setSearchOpen(false);
+                setFilterOpen(false);
+                setNotifOpen(false);
+                searchInputRef.current?.blur();
+            }
         };
         document.addEventListener("keydown", onKey);
         return () => document.removeEventListener("keydown", onKey);
     }, []);
+
+    /* ── Search box keyboard nav — Up/Down move the highlighted result,
+       Enter opens it, Escape is handled globally above. */
+    const handleSearchKeyDown = (e) => {
+        if (!searchOpen || searchQuery.trim() === "" || searchResults.length === 0) return;
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setSearchActiveIndex(i => (i + 1) % searchResults.length);
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setSearchActiveIndex(i => (i - 1 + searchResults.length) % searchResults.length);
+        } else if (e.key === "Enter") {
+            e.preventDefault();
+            const target = searchResults[searchActiveIndex] ?? searchResults[0];
+            if (target) {
+                setSearchOpen(false);
+                setSearchQuery("");
+                searchInputRef.current?.blur();
+                navigate(`/calls/${target.id}`);
+            }
+        }
+    };
 
     const handleLogout = () => {
         logoutAndRedirect();
@@ -945,14 +1010,67 @@ export default function DashboardPage() {
         return calls.filter(c => !c.createdAt || new Date(c.createdAt).getTime() >= cutoff);
     }, [calls, dateRange]);
 
+    /* ── Filter option lists — pulled from the real `rangedCalls` data
+       (not hard-coded), so the popover never offers a status or call type
+       that doesn't actually exist in the account. Based on `rangedCalls`
+       (date range only) rather than `filteredCalls` so picking one filter
+       doesn't shrink the options for the others. */
+    const outcomeStatusOptions = useMemo(
+        () => Array.from(new Set(rangedCalls.map(c => c.outcomeStatus).filter(Boolean))),
+        [rangedCalls]
+    );
+    const callTypeOptions = useMemo(
+        () => Array.from(new Set(rangedCalls.map(c => c.callType).filter(Boolean))),
+        [rangedCalls]
+    );
+    const activeFilterCount = (filters.sentiment !== "all" ? 1 : 0)
+        + (filters.qaScore !== "all" ? 1 : 0)
+        + (filters.outcomeStatus !== "all" ? 1 : 0)
+        + (filters.callType !== "all" ? 1 : 0)
+        + (filters.sortBy !== "newest" ? 1 : 0);
+
+    const resetFilters = () => setFilters({ sentiment: "all", qaScore: "all", outcomeStatus: "all", callType: "all", sortBy: "newest" });
+
+    /* ── Filtered + sorted view — layered on top of the date range. This is
+       the single source of truth every card/chart/list below reads from,
+       so Search-dropdown aside, Filters and Date Range stay synchronized
+       across the whole dashboard. */
+    const filteredCalls = useMemo(() => {
+        let list = rangedCalls;
+        if (filters.sentiment !== "all") list = list.filter(c => c.sentiment === filters.sentiment);
+        if (filters.qaScore !== "all") {
+            list = list.filter(c => {
+                if (c.overallScore == null) return false;
+                if (filters.qaScore === "high") return c.overallScore >= 80;
+                if (filters.qaScore === "medium") return c.overallScore >= 50 && c.overallScore < 80;
+                if (filters.qaScore === "low") return c.overallScore < 50;
+                return true;
+            });
+        }
+        if (filters.outcomeStatus !== "all") list = list.filter(c => c.outcomeStatus === filters.outcomeStatus);
+        if (filters.callType !== "all") list = list.filter(c => c.callType === filters.callType);
+
+        list = [...list].sort((a, b) => {
+            switch (filters.sortBy) {
+                case "oldest": return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+                case "score_high": return (b.overallScore || 0) - (a.overallScore || 0);
+                case "score_low": return (a.overallScore || 0) - (b.overallScore || 0);
+                case "newest":
+                default: return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+            }
+        });
+        return list;
+    }, [rangedCalls, filters]);
+
     /* ── Derived stats — identical calculations to before, now computed
-       over `rangedCalls` so the date-range selector actually does something. */
-    const totalCalls = rangedCalls.length;
-    const positiveCalls = rangedCalls.filter(c => c.sentiment === "POSITIVE").length;
-    const negativeCalls = rangedCalls.filter(c => c.sentiment === "NEGATIVE").length;
-    const neutralCalls = rangedCalls.filter(c => c.sentiment === "NEUTRAL").length;
-    const avgScore = totalCalls > 0 ? (rangedCalls.reduce((s, c) => s + (c.overallScore || 0), 0) / totalCalls).toFixed(1) : 0;
-    const bestScore = totalCalls > 0 ? Math.max(...rangedCalls.map(c => c.overallScore || 0)) : 0;
+       over `filteredCalls` so Date Range AND Filters both actually do
+       something and every card below stays in sync. */
+    const totalCalls = filteredCalls.length;
+    const positiveCalls = filteredCalls.filter(c => c.sentiment === "POSITIVE").length;
+    const negativeCalls = filteredCalls.filter(c => c.sentiment === "NEGATIVE").length;
+    const neutralCalls = filteredCalls.filter(c => c.sentiment === "NEUTRAL").length;
+    const avgScore = totalCalls > 0 ? (filteredCalls.reduce((s, c) => s + (c.overallScore || 0), 0) / totalCalls).toFixed(1) : 0;
+    const bestScore = totalCalls > 0 ? Math.max(...filteredCalls.map(c => c.overallScore || 0)) : 0;
     const positivePercent = totalCalls > 0 ? ((positiveCalls / totalCalls) * 100).toFixed(1) : 0;
     const negativePercent = totalCalls > 0 ? ((negativeCalls / totalCalls) * 100).toFixed(1) : 0;
     const neutralPercent = totalCalls > 0 ? ((neutralCalls / totalCalls) * 100).toFixed(1) : 0;
@@ -969,7 +1087,7 @@ export default function DashboardPage() {
     ];
 
     const timelineMap = {};
-    rangedCalls.forEach(c => {
+    filteredCalls.forEach(c => {
         if (!c.createdAt) return;
         let key;
         if (chartGranularity === "Weekly") {
@@ -985,16 +1103,16 @@ export default function DashboardPage() {
 
     const timelineData = Object.entries(timelineMap).slice(-12).map(([date, count]) => ({ date, calls: count }));
 
-    const allKeywords = rangedCalls.flatMap(c => c.keywords ? c.keywords.split(",") : []).map(k => k.trim()).filter(Boolean);
+    const allKeywords = filteredCalls.flatMap(c => c.keywords ? c.keywords.split(",") : []).map(k => k.trim()).filter(Boolean);
     const kwFreq = {};
     allKeywords.forEach(k => { kwFreq[k] = (kwFreq[k] || 0) + 1; });
     const topKeywords = Object.entries(kwFreq).sort((a, b) => b[1] - a[1]).slice(0, 12);
 
     const avgQA = (key) => totalCalls > 0
-        ? Math.round(rangedCalls.reduce((s, c) => s + (c[key] || 0), 0) / rangedCalls.length)
+        ? Math.round(filteredCalls.reduce((s, c) => s + (c[key] || 0), 0) / filteredCalls.length)
         : 0;
 
-    const recentCalls = rangedCalls.slice(0, 8);
+    const recentCalls = filteredCalls.slice(0, 8);
 
     /* ── Search — filters the real `calls` array by filename/keywords/summary. */
     const searchResults = useMemo(() => {
@@ -1007,9 +1125,63 @@ export default function DashboardPage() {
         ).slice(0, 6);
     }, [calls, searchQuery]);
 
-    /* ── Mission-control derivations — all computed from `rangedCalls`,
+    useEffect(() => { setSearchActiveIndex(0); }, [searchQuery]);
+
+    /* ── Notifications — built entirely from the real `calls` array (new
+       analyses, low scores, pending action items). Nothing here is
+       fabricated; a call only produces a notification if the underlying
+       field is actually present. `readNotifIds` is the only local state. */
+    const notifications = useMemo(() => {
+        const list = [];
+        calls.slice(0, 5).forEach(c => {
+            list.push({
+                id: `analyzed-${c.id}`, callId: c.id, time: c.createdAt,
+                Icon: Sparkles, color: "#8b5cf6",
+                title: "New call analyzed",
+                message: `${c.fileName || "A call"} finished processing.`,
+            });
+        });
+        calls.filter(c => c.overallScore != null && c.overallScore < 50).slice(0, 5).forEach(c => {
+            list.push({
+                id: `lowqa-${c.id}`, callId: c.id, time: c.createdAt,
+                Icon: AlertTriangle, color: "#ef4444",
+                title: "Low QA score detected",
+                message: `${c.fileName || "A call"} scored ${c.overallScore}/100 — may need coaching.`,
+            });
+        });
+        calls.filter(c => {
+            const items = parseList(c.actionItems);
+            return items.length > 0;
+        }).slice(0, 5).forEach(c => {
+            const count = parseList(c.actionItems).length;
+            list.push({
+                id: `action-${c.id}`, callId: c.id, time: c.createdAt,
+                Icon: CheckCircle, color: "#f59e0b",
+                title: "Action items pending",
+                message: `${c.fileName || "A call"} has ${count} open action item${count !== 1 ? "s" : ""}.`,
+            });
+        });
+        if (calls.length > 0) {
+            const mostRecent = calls[0];
+            list.push({
+                id: "weekly-report", callId: null, time: mostRecent.createdAt,
+                Icon: BarChart2, color: "#06b6d4",
+                title: "Weekly analytics ready",
+                message: `Your analytics summary across ${totalCalls} call${totalCalls !== 1 ? "s" : ""} is up to date.`,
+            });
+        }
+        return list
+            .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0))
+            .slice(0, 20);
+    }, [calls, totalCalls]);
+
+    const unreadNotifCount = notifications.filter(n => !readNotifIds.has(n.id)).length;
+    const markNotifRead = (id) => setReadNotifIds(prev => new Set(prev).add(id));
+    const markAllNotifsRead = () => setReadNotifIds(new Set(notifications.map(n => n.id)));
+
+    /* ── Mission-control derivations — all computed from `filteredCalls`,
        zero new endpoints. ───────────────────────────────────────────── */
-    const needsAttention = rangedCalls
+    const needsAttention = filteredCalls
         .filter(c => c.sentiment === "NEGATIVE" || (c.overallScore != null && c.overallScore < 50))
         .slice(0, 6)
         .map(c => {
@@ -1056,14 +1228,14 @@ export default function DashboardPage() {
 
     /* Sparkline series + trend for the KPI row — daily aggregates from real calls. */
     const callsSeries = Object.entries(timelineMap).slice(-8).map(([date, count]) => ({ date, value: count }));
-    const scoreSeries = buildDailySeries(rangedCalls, c => c.overallScore);
-    const csatSeries = buildDailySeries(rangedCalls, c => c.customerSatisfaction);
-    const positiveSeries = buildDailySeries(rangedCalls, c => c.sentiment === "POSITIVE" ? 100 : 0);
+    const scoreSeries = buildDailySeries(filteredCalls, c => c.overallScore);
+    const csatSeries = buildDailySeries(filteredCalls, c => c.customerSatisfaction);
+    const positiveSeries = buildDailySeries(filteredCalls, c => c.sentiment === "POSITIVE" ? 100 : 0);
 
     /* Top Calls — a ranked "leaderboard" built from real scored calls,
        standing in for a rep leaderboard the current single-user data
        model can't support (there's no separate rep/owner field per call). */
-    const topCalls = [...rangedCalls]
+    const topCalls = [...filteredCalls]
         .filter(c => c.overallScore != null)
         .sort((a, b) => b.overallScore - a.overallScore)
         .slice(0, 4);
@@ -1106,57 +1278,66 @@ export default function DashboardPage() {
                             <img src={logo} alt="Convexa AI" className="h-6 w-auto" />
                         </div>
 
-                        {/* Global search */}
-                        <div className="relative flex-1 max-w-md">
-                            <button onClick={() => { setSearchOpen(true); setTimeout(() => searchInputRef.current?.focus(), 10); }}
-                                className="w-full flex items-center gap-2.5 rounded-xl px-3.5 py-2 text-sm transition-colors"
-                                style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.textFaint }}>
+                        {/* Global search — one real input, no duplicate box. Results
+                            attach directly beneath it, Linear/Vercel/Notion-style. */}
+                        <div className="relative flex-1 max-w-md" ref={searchWrapRef}>
+                            <div className="w-full flex items-center gap-2.5 rounded-xl px-3.5 py-2 text-sm transition-colors"
+                                style={{ background: T.inputBg, border: `1px solid ${searchOpen ? "rgba(139,92,246,0.4)" : T.panelBorder}`, color: T.textFaint }}>
                                 <Search size={14} className="flex-shrink-0" />
-                                <span className="flex-1 text-left truncate">Search calls, keywords, customers…</span>
-                                <span className="hidden sm:flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: T.panelHover, color: T.textMuted }}>
-                                    <Command size={9} />K
-                                </span>
-                            </button>
+                                <input
+                                    ref={searchInputRef}
+                                    value={searchQuery}
+                                    onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true); }}
+                                    onFocus={() => setSearchOpen(true)}
+                                    onKeyDown={handleSearchKeyDown}
+                                    placeholder="Search calls, keywords, customers…"
+                                    className="flex-1 min-w-0 bg-transparent text-sm outline-none"
+                                    style={{ color: T.text }}
+                                />
+                                {searchQuery ? (
+                                    <button onClick={() => { setSearchQuery(""); searchInputRef.current?.focus(); }} className="flex-shrink-0">
+                                        <X size={13} style={{ color: T.textFaint }} />
+                                    </button>
+                                ) : (
+                                    <span className="hidden sm:flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: T.panelHover, color: T.textMuted }}>
+                                        <Command size={9} />K
+                                    </span>
+                                )}
+                            </div>
 
-                            {searchOpen && (
-                                <>
-                                    <div className="fixed inset-0 z-40" onClick={() => setSearchOpen(false)} />
-                                    <div className="absolute left-0 top-full mt-2 w-full sm:w-96 rounded-2xl overflow-hidden z-50"
-                                        style={{ background: "rgba(10,10,26,0.98)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(20px)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
-                                        <div className="flex items-center gap-2.5 px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                                            <Search size={14} className="text-slate-500" />
-                                            <input ref={searchInputRef} autoFocus value={searchQuery}
-                                                onChange={e => setSearchQuery(e.target.value)}
-                                                placeholder="Search calls, keywords, summaries…"
-                                                className="flex-1 bg-transparent text-sm text-white placeholder-slate-600 outline-none" />
-                                            {searchQuery && (
-                                                <button onClick={() => setSearchQuery("")}><X size={13} className="text-slate-500" /></button>
-                                            )}
-                                        </div>
-                                        <div className="max-h-72 overflow-y-auto">
-                                            {searchQuery.trim() === "" ? (
-                                                <p className="px-4 py-6 text-xs text-slate-600 text-center">Start typing to search your calls</p>
-                                            ) : searchResults.length === 0 ? (
-                                                <p className="px-4 py-6 text-xs text-slate-600 text-center">No matches for "{searchQuery}"</p>
-                                            ) : (
-                                                searchResults.map(call => (
-                                                    <Link key={call.id} to={`/calls/${call.id}`}
-                                                        onClick={() => setSearchOpen(false)}
-                                                        className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/5">
-                                                        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "rgba(139,92,246,0.15)" }}>
-                                                            <Phone size={13} className="text-violet-400" />
-                                                        </div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <p className="text-xs font-semibold text-white truncate">{call.fileName}</p>
-                                                            <p className="text-[10px] text-slate-500 truncate">{call.summary?.slice(0, 60) || "No summary"}</p>
-                                                        </div>
-                                                        <ArrowRight size={11} className="text-slate-600 flex-shrink-0" />
-                                                    </Link>
-                                                ))
-                                            )}
-                                        </div>
+                            {searchOpen && searchQuery.trim() !== "" && (
+                                <div className="absolute left-0 top-full mt-2 w-full sm:w-96 rounded-2xl overflow-hidden z-50"
+                                    style={{ background: "rgba(10,10,26,0.98)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(20px)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", animation: "dropdownIn 0.15s ease-out", transformOrigin: "top" }}>
+                                    <div className="max-h-72 overflow-y-auto">
+                                        {searchResults.length === 0 ? (
+                                            <p className="px-4 py-6 text-xs text-slate-600 text-center">No matches for "{searchQuery}"</p>
+                                        ) : (
+                                            searchResults.map((call, i) => (
+                                                <Link key={call.id} to={`/calls/${call.id}`}
+                                                    onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
+                                                    onMouseEnter={() => setSearchActiveIndex(i)}
+                                                    className="flex items-center gap-3 px-4 py-3 transition-colors"
+                                                    style={{ background: i === searchActiveIndex ? "rgba(139,92,246,0.14)" : "transparent" }}>
+                                                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "rgba(139,92,246,0.15)" }}>
+                                                        <Phone size={13} className="text-violet-400" />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-xs font-semibold text-white truncate">{call.fileName}</p>
+                                                        <p className="text-[10px] text-slate-500 truncate">{call.summary?.slice(0, 60) || "No summary"}</p>
+                                                    </div>
+                                                    <ArrowRight size={11} className="text-slate-600 flex-shrink-0" />
+                                                </Link>
+                                            ))
+                                        )}
                                     </div>
-                                </>
+                                    {searchResults.length > 0 && (
+                                        <div className="flex items-center gap-3 px-4 py-2 text-[10px]" style={{ borderTop: "1px solid rgba(255,255,255,0.07)", color: "#64748b" }}>
+                                            <span className="flex items-center gap-1"><ArrowUp size={9} /><ArrowDown size={9} /> Navigate</span>
+                                            <span>↵ Open</span>
+                                            <span>Esc Close</span>
+                                        </div>
+                                    )}
+                                </div>
                             )}
                         </div>
 
@@ -1174,12 +1355,125 @@ export default function DashboardPage() {
                                 <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: T.textFaint }} />
                             </div>
 
-                            <button className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors"
-                                style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.textMuted }}
-                                title="Filters (coming soon)">
-                                <SlidersHorizontal size={13} />
-                                Filter
-                            </button>
+                            <div className="relative" ref={filterWrapRef}>
+                                <button onClick={() => setFilterOpen(o => !o)}
+                                    className="relative flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors"
+                                    style={{ background: filterOpen ? T.panelHover : T.inputBg, border: `1px solid ${activeFilterCount > 0 ? "rgba(139,92,246,0.4)" : T.panelBorder}`, color: activeFilterCount > 0 ? "#a78bfa" : T.textMuted }}
+                                    title="Filter dashboard data">
+                                    <SlidersHorizontal size={13} />
+                                    Filter
+                                    {activeFilterCount > 0 && (
+                                        <span className="flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold text-white" style={{ background: "#7c3aed" }}>
+                                            {activeFilterCount}
+                                        </span>
+                                    )}
+                                </button>
+
+                                {filterOpen && (
+                                    <div className="absolute right-0 top-full mt-2 w-80 rounded-2xl overflow-hidden z-50"
+                                        style={{ background: "rgba(10,10,26,0.98)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(20px)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", animation: "dropdownIn 0.15s ease-out" }}>
+                                        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                                            <p className="text-sm font-bold text-white">Filter calls</p>
+                                            <button onClick={resetFilters}
+                                                className="flex items-center gap-1 text-[11px] font-semibold transition-colors"
+                                                style={{ color: activeFilterCount > 0 ? "#a78bfa" : "#475569" }}
+                                                disabled={activeFilterCount === 0}>
+                                                <RotateCcw size={10} /> Reset
+                                            </button>
+                                        </div>
+
+                                        <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+                                            {/* Sentiment */}
+                                            <div>
+                                                <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: "#64748b" }}>Sentiment</p>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {["all", "POSITIVE", "NEUTRAL", "NEGATIVE"].map(v => (
+                                                        <button key={v} onClick={() => setFilters(f => ({ ...f, sentiment: v }))}
+                                                            className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors capitalize"
+                                                            style={{
+                                                                background: filters.sentiment === v ? "rgba(139,92,246,0.18)" : "rgba(255,255,255,0.04)",
+                                                                border: `1px solid ${filters.sentiment === v ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.08)"}`,
+                                                                color: filters.sentiment === v ? "#c4b5fd" : "#94a3b8",
+                                                            }}>
+                                                            {v === "all" ? "All" : v.charAt(0) + v.slice(1).toLowerCase()}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* QA Score */}
+                                            <div>
+                                                <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: "#64748b" }}>QA Score</p>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {[["all", "All"], ["high", "80+ High"], ["medium", "50–79 Medium"], ["low", "<50 Low"]].map(([v, label]) => (
+                                                        <button key={v} onClick={() => setFilters(f => ({ ...f, qaScore: v }))}
+                                                            className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors"
+                                                            style={{
+                                                                background: filters.qaScore === v ? "rgba(139,92,246,0.18)" : "rgba(255,255,255,0.04)",
+                                                                border: `1px solid ${filters.qaScore === v ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.08)"}`,
+                                                                color: filters.qaScore === v ? "#c4b5fd" : "#94a3b8",
+                                                            }}>
+                                                            {label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Outcome Status — options built from real data */}
+                                            <div>
+                                                <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: "#64748b" }}>Outcome Status</p>
+                                                {outcomeStatusOptions.length === 0 ? (
+                                                    <p className="text-[11px]" style={{ color: "#475569" }}>No outcome data yet</p>
+                                                ) : (
+                                                    <select value={filters.outcomeStatus} onChange={e => setFilters(f => ({ ...f, outcomeStatus: e.target.value }))}
+                                                        className="w-full px-3 py-2 rounded-lg text-[11px] font-semibold outline-none"
+                                                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#e2e8f0" }}>
+                                                        <option value="all">All statuses</option>
+                                                        {outcomeStatusOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                                                    </select>
+                                                )}
+                                            </div>
+
+                                            {/* Call Type — options built from real data */}
+                                            <div>
+                                                <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: "#64748b" }}>Call Type</p>
+                                                {callTypeOptions.length === 0 ? (
+                                                    <p className="text-[11px]" style={{ color: "#475569" }}>No call type data yet</p>
+                                                ) : (
+                                                    <select value={filters.callType} onChange={e => setFilters(f => ({ ...f, callType: e.target.value }))}
+                                                        className="w-full px-3 py-2 rounded-lg text-[11px] font-semibold outline-none"
+                                                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#e2e8f0" }}>
+                                                        <option value="all">All call types</option>
+                                                        {callTypeOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                                                    </select>
+                                                )}
+                                            </div>
+
+                                            {/* Sort By */}
+                                            <div>
+                                                <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: "#64748b" }}>Sort By</p>
+                                                <select value={filters.sortBy} onChange={e => setFilters(f => ({ ...f, sortBy: e.target.value }))}
+                                                    className="w-full px-3 py-2 rounded-lg text-[11px] font-semibold outline-none"
+                                                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#e2e8f0" }}>
+                                                    <option value="newest">Newest first</option>
+                                                    <option value="oldest">Oldest first</option>
+                                                    <option value="score_high">Highest QA score</option>
+                                                    <option value="score_low">Lowest QA score</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <div className="px-4 py-3 flex items-center justify-between" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+                                            <span className="text-[11px]" style={{ color: "#64748b" }}>{totalCalls} call{totalCalls !== 1 ? "s" : ""} match</span>
+                                            <button onClick={() => setFilterOpen(false)}
+                                                className="px-3 py-1.5 rounded-lg text-[11px] font-bold text-white transition-all active:scale-95"
+                                                style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>
+                                                Done
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <div className="flex items-center gap-2 flex-shrink-0">
@@ -1200,16 +1494,77 @@ export default function DashboardPage() {
                                 {themeMode === "dark" ? <Sun size={15} /> : <Moon size={15} />}
                             </button>
 
-                            <button className="relative w-9 h-9 flex items-center justify-center rounded-xl transition-colors flex-shrink-0"
-                                style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.textMuted }}
-                                title={`${needsAttention.length} calls need attention`}>
-                                <Bell size={15} />
-                                {needsAttention.length > 0 && (
-                                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{ background: "#ef4444" }}>
-                                        {needsAttention.length}
-                                    </span>
+                            <div className="relative" ref={notifWrapRef}>
+                                <button onClick={() => setNotifOpen(o => !o)}
+                                    className="relative w-9 h-9 flex items-center justify-center rounded-xl transition-colors flex-shrink-0"
+                                    style={{ background: notifOpen ? T.panelHover : T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.textMuted }}
+                                    title={`${unreadNotifCount} unread notification${unreadNotifCount !== 1 ? "s" : ""}`}>
+                                    <Bell size={15} />
+                                    {unreadNotifCount > 0 && (
+                                        <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+                                            style={{ background: "#ef4444", animation: "notifPop 0.3s ease-out" }}>
+                                            {unreadNotifCount}
+                                        </span>
+                                    )}
+                                </button>
+
+                                {notifOpen && (
+                                    <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 rounded-2xl overflow-hidden z-50"
+                                        style={{ background: "rgba(10,10,26,0.98)", border: "1px solid rgba(255,255,255,0.09)", backdropFilter: "blur(20px)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", animation: "dropdownIn 0.15s ease-out" }}>
+                                        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                                            <p className="text-sm font-bold text-white">Notifications</p>
+                                            {notifications.length > 0 && unreadNotifCount > 0 && (
+                                                <button onClick={markAllNotifsRead}
+                                                    className="flex items-center gap-1 text-[11px] font-semibold transition-colors"
+                                                    style={{ color: "#a78bfa" }}>
+                                                    <CheckCheck size={11} /> Mark all read
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        <div className="max-h-96 overflow-y-auto">
+                                            {notifications.length === 0 ? (
+                                                <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+                                                    <div className="w-11 h-11 rounded-full flex items-center justify-center mb-3" style={{ background: "rgba(255,255,255,0.05)" }}>
+                                                        <Inbox size={18} style={{ color: "#475569" }} />
+                                                    </div>
+                                                    <p className="text-xs font-semibold" style={{ color: "#94a3b8" }}>You're all caught up</p>
+                                                    <p className="text-[11px] mt-1" style={{ color: "#475569" }}>New activity will show up here.</p>
+                                                </div>
+                                            ) : (
+                                                notifications.map(n => {
+                                                    const isRead = readNotifIds.has(n.id);
+                                                    const Row = (
+                                                        <div
+                                                            onClick={() => markNotifRead(n.id)}
+                                                            className="flex items-start gap-3 px-4 py-3 cursor-pointer transition-all duration-300"
+                                                            style={{ background: isRead ? "transparent" : "rgba(139,92,246,0.06)", opacity: isRead ? 0.55 : 1, borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                                                            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${n.color}1f` }}>
+                                                                <n.Icon size={13} style={{ color: n.color }} />
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <p className="text-xs font-semibold truncate" style={{ color: isRead ? "#94a3b8" : "#fff" }}>{n.title}</p>
+                                                                    {!isRead && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: "#8b5cf6" }} />}
+                                                                </div>
+                                                                <p className="text-[11px] mt-0.5 leading-relaxed" style={{ color: "#64748b" }}>{n.message}</p>
+                                                                <p className="text-[10px] mt-1" style={{ color: "#475569" }}>{timeAgo(n.time)}</p>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                    return n.callId ? (
+                                                        <Link key={n.id} to={`/calls/${n.callId}`} onClick={() => { markNotifRead(n.id); setNotifOpen(false); }}>
+                                                            {Row}
+                                                        </Link>
+                                                    ) : (
+                                                        <div key={n.id}>{Row}</div>
+                                                    );
+                                                })
+                                            )}
+                                        </div>
+                                    </div>
                                 )}
-                            </button>
+                            </div>
 
                             <div className="relative" onClick={(e) => e.stopPropagation()}>
                                 <button onClick={() => setProfileOpen(o => !o)}
@@ -1709,6 +2064,8 @@ export default function DashboardPage() {
                 @keyframes drawerSlideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
                 @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
                 @keyframes modalIn { from { transform: scale(0.94) translateY(12px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+                @keyframes dropdownIn { from { transform: translateY(-6px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+                @keyframes notifPop { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
             `}</style>
         </div>
     );
