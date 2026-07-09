@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import {
     AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
     XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+    ComposedChart, Line,
 } from "recharts";
 import api, { getUser } from "../services/api.js";
 import { logoutAndRedirect } from "../components/ProtectedRoute";
@@ -194,9 +195,25 @@ export default function AnalyticsPage() {
     const [themeMode, setThemeMode] = useState("dark");
     const [searchQuery, setSearchQuery] = useState("");
     const [searchOpen, setSearchOpen] = useState(false);
-    const [dateRange, setDateRange] = useState("30d"); // 7d | 30d | all — filters the local `calls` array only
+    const [dateRange, setDateRange] = useState("30d"); // 7d | 30d | all — now also the range sent to the backend
     const T = THEMES[themeMode];
     const searchInputRef = useRef(null);
+
+    /* ── Server-computed analytics (GET /api/analytics/employee): totals,
+       trend %, daily series, top keywords, and buying-intent distribution.
+       `calls` (via /api/calls/my-calls) is still fetched for Search and for
+       the two widgets the backend doesn't cover yet — Score Distribution and
+       Risk Analysis, which need raw per-call scores, not aggregates. ───── */
+    const [analyticsStats, setAnalyticsStats] = useState(null);
+    const [analyticsLoading, setAnalyticsLoading] = useState(true);
+    const [analyticsError, setAnalyticsError] = useState(null);
+
+    /* ── GET /api/dashboard/employee, reused here only for its per-dimension
+       QA averages (avgCommunication/avgProblemResolution/avgProfessionalism/
+       avgCustomerSatisfaction) and needs-attention count — the analytics
+       endpoint doesn't carry those, and Dashboard already owns that math. */
+    const [dashboardStats, setDashboardStats] = useState(null);
+    const [dashboardLoading, setDashboardLoading] = useState(true);
 
     const fetchCalls = useCallback(async () => {
         setLoading(true);
@@ -211,7 +228,35 @@ export default function AnalyticsPage() {
         }
     }, []);
 
+    const fetchAnalyticsStats = useCallback(async (range) => {
+        setAnalyticsLoading(true);
+        setAnalyticsError(null);
+        try {
+            const res = await api.get(`/api/analytics/employee?range=${range}`);
+            setAnalyticsStats(res.data);
+        } catch (err) {
+            console.error("Failed to fetch analytics stats:", err);
+            setAnalyticsError("Failed to load analytics data.");
+        } finally {
+            setAnalyticsLoading(false);
+        }
+    }, []);
+
+    const fetchDashboardStats = useCallback(async (range) => {
+        setDashboardLoading(true);
+        try {
+            const res = await api.get(`/api/dashboard/employee?range=${range}`);
+            setDashboardStats(res.data);
+        } catch (err) {
+            console.error("Failed to fetch dashboard stats:", err);
+        } finally {
+            setDashboardLoading(false);
+        }
+    }, []);
+
     useEffect(() => { fetchCalls(); }, [fetchCalls]);
+    useEffect(() => { fetchAnalyticsStats(dateRange); }, [fetchAnalyticsStats, dateRange]);
+    useEffect(() => { fetchDashboardStats(dateRange); }, [fetchDashboardStats, dateRange]);
 
     useEffect(() => {
         const h = () => setProfileOpen(false);
@@ -268,16 +313,23 @@ export default function AnalyticsPage() {
         ).slice(0, 6);
     }, [calls, searchQuery]);
 
-    // ── Derived data (unchanged calculations, now over rangedCalls) ────────
-    const total        = rangedCalls.length;
-    const avgScore     = total > 0 ? (rangedCalls.reduce((s, c) => s + (c.overallScore || 0), 0) / total).toFixed(1) : 0;
-    const positive     = rangedCalls.filter(c => c.sentiment === "POSITIVE").length;
-    const negative     = rangedCalls.filter(c => c.sentiment === "NEGATIVE").length;
-    const neutral      = rangedCalls.filter(c => c.sentiment === "NEUTRAL").length;
+    // ── Derived data — now read directly from GET /api/analytics/employee
+    // (analyticsStats) and GET /api/dashboard/employee (dashboardStats),
+    // instead of being recomputed here from the raw `calls`/`rangedCalls`
+    // list. Score Distribution and Risk Analysis are the two exceptions:
+    // neither backend endpoint buckets per-call scores, so those two still
+    // read `rangedCalls` directly (noted again at their definitions below).
+    const total    = analyticsStats?.totalCalls ?? 0;
+    const avgScore = analyticsStats && analyticsStats.totalCalls > 0 ? analyticsStats.avgScore.toFixed(1) : 0;
 
-    const avgQA = (key) => total > 0
-        ? Math.round(rangedCalls.reduce((s, c) => s + (c[key] || 0), 0) / total)
-        : 0;
+    // Raw counts aren't in AnalyticsResponse (only percentages are) — these
+    // three lines reconstruct display counts from the backend's own
+    // percentages rather than reclassifying sentiment client-side.
+    const positivePct = analyticsStats?.positivePercent ?? 0;
+    const negativePct = analyticsStats?.negativePercent ?? 0;
+    const positive = Math.round((positivePct / 100) * total);
+    const negative = Math.round((negativePct / 100) * total);
+    const neutral  = Math.max(0, total - positive - negative);
 
     const sentimentData = [
         { name: "Positive", value: positive },
@@ -285,72 +337,53 @@ export default function AnalyticsPage() {
         { name: "Negative", value: negative },
     ].filter(d => d.value > 0);
 
-    const dayMap = {};
-    rangedCalls.forEach(c => {
-        if (!c.createdAt) return;
-        const d = new Date(c.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-        dayMap[d] = (dayMap[d] || 0) + 1;
-    });
-    const callsPerDay = Object.entries(dayMap)
-        .sort((a, b) => new Date(a[0]) - new Date(b[0]))
-        .slice(-20)
-        .map(([date, count]) => ({ date, calls: count }));
+    const formatShortDate = (isoDay) =>
+        new Date(`${isoDay}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-    const scoreTrend = [...rangedCalls]
-        .filter(c => c.overallScore != null && c.createdAt)
-        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+    // Volume + Score merged into one series — these used to be two separate
+    // charts (Score Trend, Calls Per Day) sharing the same x-axis (day) with
+    // no new information between them. One combo chart, dual axis, instead.
+    const volumeScoreTrend = (analyticsStats?.dailySeries ?? [])
         .slice(-20)
-        .map((c, i) => ({
-            idx: i + 1,
-            score: c.overallScore,
-            name: c.fileName?.slice(0, 12),
-        }));
+        .map(d => ({ date: formatShortDate(d.date), calls: d.callCount, score: d.avgScore }));
 
+    // Score Distribution needs each call's individual score, which neither
+    // backend endpoint returns (both only return aggregates) — kept as the
+    // one histogram still computed from the raw calls list.
     const scoreHist = Array.from({ length: 10 }, (_, i) => ({
         range: `${i * 10}–${i * 10 + 9}`,
         count: rangedCalls.filter(c => c.overallScore >= i * 10 && c.overallScore < (i + 1) * 10).length,
     }));
 
-    const allKw = rangedCalls.flatMap(c => parseList(c.keywords));
-    const kwFreq = {};
-    allKw.forEach(k => { kwFreq[k] = (kwFreq[k] || 0) + 1; });
-    const topKw = Object.entries(kwFreq).sort((a, b) => b[1] - a[1]).slice(0, 15);
+    const topKw = (analyticsStats?.topKeywords ?? []).map(k => [k.keyword, k.count]);
 
     const qaDims = [
-        { key: "communication",       label: "Communication",     color: "#8b5cf6" },
-        { key: "problemResolution",   label: "Problem Resolution", color: "#3b82f6" },
-        { key: "professionalism",     label: "Professionalism",    color: "#10b981" },
-        { key: "customerSatisfaction",label: "Cust. Satisfaction", color: "#f59e0b" },
-    ].map(d => ({ ...d, value: avgQA(d.key) }));
+        { key: "communication",        label: "Communication",      color: "#8b5cf6", value: dashboardStats?.avgCommunication ?? 0 },
+        { key: "problemResolution",    label: "Problem Resolution", color: "#3b82f6", value: dashboardStats?.avgProblemResolution ?? 0 },
+        { key: "professionalism",      label: "Professionalism",    color: "#10b981", value: dashboardStats?.avgProfessionalism ?? 0 },
+        { key: "customerSatisfaction", label: "Cust. Satisfaction", color: "#f59e0b", value: dashboardStats?.avgCustomerSatisfaction ?? 0 },
+    ];
 
-    // ── Presentation-only derived helpers ───────────────────────────────────
-    const seriesTrend = (values) => {
-        if (!values || values.length < 2) return null;
-        const mid = Math.ceil(values.length / 2);
-        const first = values.slice(0, mid).reduce((a, b) => a + b, 0) / mid;
-        const second = values.slice(mid).reduce((a, b) => a + b, 0) / (values.length - mid || 1);
-        if (first === 0) return null;
-        return ((second - first) / first) * 100;
-    };
-    const callsSeries      = callsPerDay.map(d => d.calls);
-    const scoreSeries      = scoreTrend.map(d => d.score);
-    const positivePct      = total > 0 ? (positive / total) * 100 : 0;
-    const negativePct      = total > 0 ? (negative / total) * 100 : 0;
+    // seriesTrend() is gone — the backend already computed these two trend
+    // percentages (same "second half vs first half" definition it always used).
+    const callsSeries = volumeScoreTrend.map(d => d.calls);
+    const scoreSeries = volumeScoreTrend.map(d => d.score);
+    const callsTrendPct = analyticsStats?.callsTrendPercent ?? null;
+    const scoreTrendPct = analyticsStats?.scoreTrendPercent ?? null;
 
+    // Risk Analysis needs the same per-call score buckets as Score
+    // Distribution above, for the same reason — kept on rangedCalls.
     const highRisk = rangedCalls.filter(c => c.overallScore != null && c.overallScore < 50).length;
     const medRisk  = rangedCalls.filter(c => c.overallScore != null && c.overallScore >= 50 && c.overallScore < 75).length;
     const lowRisk  = rangedCalls.filter(c => c.overallScore != null && c.overallScore >= 75).length;
     const scoredTotal = highRisk + medRisk + lowRisk;
 
-    const intentCounts = rangedCalls.reduce((acc, c) => {
-        if (!c.buyingIntent) return acc;
-        acc[c.buyingIntent] = (acc[c.buyingIntent] || 0) + 1;
-        return acc;
-    }, {});
+    const intentCounts = analyticsStats?.buyingIntentDistribution ?? {};
 
-    /* Needs-attention count — same definition the Dashboard uses for its
-       sidebar badge, so the badge reads identically on both pages. */
-    const needsAttention = rangedCalls.filter(c => c.sentiment === "NEGATIVE" || (c.overallScore != null && c.overallScore < 50));
+    /* Needs-attention count — sourced from the same GET /api/dashboard/employee
+       list the Dashboard renders, so the sidebar badge reads identically on
+       both pages instead of two independent client-side classifications. */
+    const needsAttentionCount = dashboardStats?.needsAttention?.length ?? 0;
 
     const tooltipStyle = tooltipStyleFor(T);
 
@@ -367,7 +400,7 @@ export default function AnalyticsPage() {
 
             <Sidebar collapsed={sidebarCollapsed} setCollapsed={setSidebarCollapsed} T={T} user={user}
                 handleLogout={handleLogout} currentPath={location.pathname}
-                needsAttentionCount={needsAttention.length} totalCalls={total} />
+                needsAttentionCount={needsAttentionCount} totalCalls={total} />
 
             <div className="flex-1 min-w-0 flex flex-col">
                 {/* ── TOP BAR — identical structure to the Dashboard's ── */}
@@ -471,11 +504,11 @@ export default function AnalyticsPage() {
 
                             <button className="relative w-9 h-9 flex items-center justify-center rounded-xl transition-colors flex-shrink-0"
                                 style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.textMuted }}
-                                title={`${needsAttention.length} calls need attention`}>
+                                title={`${needsAttentionCount} calls need attention`}>
                                 <Bell size={15} />
-                                {needsAttention.length > 0 && (
+                                {needsAttentionCount > 0 && (
                                     <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{ background: "#ef4444" }}>
-                                        {needsAttention.length}
+                                        {needsAttentionCount}
                                     </span>
                                 )}
                             </button>
@@ -597,7 +630,17 @@ export default function AnalyticsPage() {
                         </div>
                     )}
 
-                    {!loading && total === 0 ? (
+                    {analyticsError && (
+                        <div className="flex items-center gap-3 p-4 rounded-2xl" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)" }}>
+                            <AlertTriangle size={16} className="text-red-400 flex-shrink-0" />
+                            <span className="text-sm text-red-300">{analyticsError}</span>
+                            <button onClick={() => fetchAnalyticsStats(dateRange)} className="ml-auto flex items-center gap-1.5 text-xs bg-red-500/20 hover:bg-red-500/30 px-3 py-1.5 rounded-lg font-semibold transition-colors text-red-200">
+                                <RefreshCw className="w-3 h-3" /> Retry
+                            </button>
+                        </div>
+                    )}
+
+                    {!loading && !analyticsLoading && total === 0 ? (
                         <div className="text-center py-24 rounded-3xl border border-dashed" style={{ background: T.panel, borderColor: T.panelBorder }}>
                             <div className="w-16 h-16 mx-auto mb-5 rounded-2xl flex items-center justify-center"
                                 style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.25)" }}>
@@ -616,20 +659,20 @@ export default function AnalyticsPage() {
                         <>
                             {/* ── KPI CARDS ── */}
                             <div>
-                                <div className="mb-3"><SectionLabel icon={Gauge} tone="#8b5cf6">Key Metrics</SectionLabel></div>
+                                <div className="mb-3"><SectionLabel icon={Gauge} tone="#8b5cf6">Key Metrics — This Period</SectionLabel></div>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                    {loading ? (
+                                    {(loading || analyticsLoading) ? (
                                         Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} T={T} className="h-32" />)
                                     ) : (
                                         <>
                                             <KPICard T={T} label="Total Calls" value={total} Icon={Phone} accent="#8b5cf6"
-                                                series={callsSeries} trendPct={seriesTrend(callsSeries)} sub="Analysed conversations" />
+                                                series={callsSeries} trendPct={callsTrendPct} sub={callsTrendPct == null ? "Analysed conversations" : "vs. earlier this period"} />
                                             <KPICard T={T} label="Avg QA Score" value={avgScore} Icon={Star} accent="#3b82f6"
-                                                series={scoreSeries} trendPct={seriesTrend(scoreSeries)} sub="Out of 100" />
+                                                series={scoreSeries} trendPct={scoreTrendPct} sub={scoreTrendPct == null ? "Out of 100" : "vs. earlier this period"} />
                                             <KPICard T={T} label="Positive Calls" value={positive} Icon={Smile} accent="#10b981"
-                                                series={scoreSeries} trendPct={null} sub={`${positivePct.toFixed(1)}% of total`} />
+                                                series={scoreSeries} trendPct={null} sub={`${positivePct.toFixed(1)}% of this period`} />
                                             <KPICard T={T} label="Negative Calls" value={negative} Icon={Frown} accent="#ef4444"
-                                                series={scoreSeries} trendPct={null} sub={`${negativePct.toFixed(1)}% of total`} />
+                                                series={scoreSeries} trendPct={null} sub={`${negativePct.toFixed(1)}% of this period`} />
                                         </>
                                     )}
                                 </div>
@@ -639,7 +682,7 @@ export default function AnalyticsPage() {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 <Panel T={T}>
                                     <SectionLabel icon={Smile} tone="#a1a1aa">Sentiment Distribution</SectionLabel>
-                                    {loading ? <Skeleton T={T} className="h-56 mt-4" /> : (
+                                    {(loading || analyticsLoading) ? <Skeleton T={T} className="h-56 mt-4" /> : (
                                         <div className="flex flex-col gap-5 mt-4">
                                             <ResponsiveContainer width="100%" height={200}>
                                                 <PieChart>
@@ -676,22 +719,15 @@ export default function AnalyticsPage() {
 
                                 <Panel T={T}>
                                     <SectionLabel icon={Target} tone="#a1a1aa">Avg QA Dimensions</SectionLabel>
-                                    {loading ? <Skeleton T={T} className="h-56 mt-4" /> : (
-                                        <div className="space-y-4 mt-4">
-                                            <div className="grid grid-cols-2 sm:flex sm:justify-around gap-4">
-                                                {qaDims.map(d => (
-                                                    <div key={d.key} className="flex flex-col items-center gap-1.5">
-                                                        <ScoreRing score={d.value} size={64} stroke={5} color={d.color} textColor={T.text} track={T.panelHover} />
-                                                        <p className="text-xs text-center max-w-16 leading-tight" style={{ color: T.textFaint }}>{d.label}</p>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            <ResponsiveContainer width="100%" height={100}>
-                                                <BarChart data={qaDims} barSize={28}>
-                                                    <XAxis dataKey="label" tick={{ fill: T.textFaint, fontSize: 9 }} axisLine={false} tickLine={false} />
-                                                    <YAxis domain={[0, 100]} hide />
+                                    {(loading || dashboardLoading) ? <Skeleton T={T} className="h-56 mt-4" /> : (
+                                        <div className="mt-4">
+                                            <ResponsiveContainer width="100%" height={200}>
+                                                <BarChart data={qaDims} barSize={36}>
+                                                    <CartesianGrid strokeDasharray="3 3" stroke={T.divider} vertical={false} />
+                                                    <XAxis dataKey="label" tick={{ fill: T.textFaint, fontSize: 10 }} axisLine={false} tickLine={false} />
+                                                    <YAxis domain={[0, 100]} tick={{ fill: T.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
                                                     <Tooltip contentStyle={tooltipStyle} />
-                                                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                                                    <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                                                         {qaDims.map(d => (
                                                             <Cell key={d.key} fill={d.color} />
                                                         ))}
@@ -703,65 +739,42 @@ export default function AnalyticsPage() {
                                 </Panel>
                             </div>
 
-                            {/* ── CHARTS ROW 2 ── */}
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                <Panel T={T}>
-                                    <SectionLabel icon={TrendingUp} tone="#a1a1aa">Score Trend</SectionLabel>
-                                    {loading ? <Skeleton T={T} className="h-56 mt-4" /> : scoreTrend.length < 2 ? (
-                                        <div className="flex items-center justify-center h-48 text-sm flex-col gap-2 mt-4" style={{ color: T.textFaint }}>
-                                            <TrendingUp className="w-8 h-8 opacity-50" />
-                                            <span>Need more calls for trend data</span>
+                            {/* Volume + Score, merged into one combo chart — previously two
+                                separate time-series (Score Trend, Calls Per Day) sharing the
+                                same x-axis with no distinct insight between them. */}
+                            <Panel T={T}>
+                                <SectionLabel icon={TrendingUp} tone="#a1a1aa">Volume & Score Trend</SectionLabel>
+                                {(loading || analyticsLoading) ? <Skeleton T={T} className="h-56 mt-4" /> : volumeScoreTrend.length < 2 ? (
+                                    <div className="flex items-center justify-center h-48 text-sm flex-col gap-2 mt-4" style={{ color: T.textFaint }}>
+                                        <TrendingUp className="w-8 h-8 opacity-50" />
+                                        <span>Need more calls across more days for a trend</span>
+                                    </div>
+                                ) : (
+                                    <div className="mt-4">
+                                        <ResponsiveContainer width="100%" height={260}>
+                                            <ComposedChart data={volumeScoreTrend}>
+                                                <defs>
+                                                    <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                                                        <stop offset="0%" stopColor="#8b5cf6" />
+                                                        <stop offset="100%" stopColor="#3b82f6" />
+                                                    </linearGradient>
+                                                </defs>
+                                                <CartesianGrid strokeDasharray="3 3" stroke={T.divider} vertical={false} />
+                                                <XAxis dataKey="date" tick={{ fill: T.textFaint, fontSize: 10 }} axisLine={false} tickLine={false} />
+                                                <YAxis yAxisId="calls" allowDecimals={false} tick={{ fill: T.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
+                                                <YAxis yAxisId="score" orientation="right" domain={[0, 100]} tick={{ fill: T.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
+                                                <Tooltip contentStyle={tooltipStyle} />
+                                                <Bar yAxisId="calls" dataKey="calls" name="Calls" fill="url(#barGrad)" radius={[4, 4, 0, 0]} barSize={20} />
+                                                <Line yAxisId="score" type="monotone" dataKey="score" name="Avg Score" stroke="#f59e0b" strokeWidth={2.5} dot={{ fill: "#f59e0b", r: 3.5, strokeWidth: 0 }} />
+                                            </ComposedChart>
+                                        </ResponsiveContainer>
+                                        <div className="flex items-center justify-center gap-5 mt-2">
+                                            <span className="flex items-center gap-1.5 text-[11px]" style={{ color: T.textFaint }}><span className="w-2.5 h-2.5 rounded-sm" style={{ background: "#8b5cf6" }} /> Call volume</span>
+                                            <span className="flex items-center gap-1.5 text-[11px]" style={{ color: T.textFaint }}><span className="w-2.5 h-2.5 rounded-full" style={{ background: "#f59e0b" }} /> Avg QA score</span>
                                         </div>
-                                    ) : (
-                                        <div className="mt-4">
-                                            <ResponsiveContainer width="100%" height={220}>
-                                                <AreaChart data={scoreTrend}>
-                                                    <defs>
-                                                        <linearGradient id="scoreGrad" x1="0" y1="0" x2="0" y2="1">
-                                                            <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.35} />
-                                                            <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                                                        </linearGradient>
-                                                    </defs>
-                                                    <CartesianGrid strokeDasharray="3 3" stroke={T.divider} />
-                                                    <XAxis dataKey="idx" tick={{ fill: T.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} label={{ value: "Call #", position: "insideBottom", fill: T.textFaint, fontSize: 10 }} />
-                                                    <YAxis domain={[0, 100]} tick={{ fill: T.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
-                                                    <Tooltip contentStyle={tooltipStyle} formatter={(v) => [v, "Score"]} />
-                                                    <Area type="monotone" dataKey="score" stroke="#8b5cf6" strokeWidth={2.5}
-                                                        fill="url(#scoreGrad)" dot={{ fill: "#8b5cf6", r: 4, strokeWidth: 0 }} />
-                                                </AreaChart>
-                                            </ResponsiveContainer>
-                                        </div>
-                                    )}
-                                </Panel>
-
-                                <Panel T={T}>
-                                    <SectionLabel icon={CalendarDays} tone="#a1a1aa">Calls Per Day</SectionLabel>
-                                    {loading ? <Skeleton T={T} className="h-56 mt-4" /> : callsPerDay.length === 0 ? (
-                                        <div className="flex items-center justify-center h-48 text-sm flex-col gap-2 mt-4" style={{ color: T.textFaint }}>
-                                            <CalendarDays className="w-8 h-8 opacity-50" />
-                                            <span>Upload more calls to see daily activity</span>
-                                        </div>
-                                    ) : (
-                                        <div className="mt-4">
-                                            <ResponsiveContainer width="100%" height={220}>
-                                                <BarChart data={callsPerDay} barSize={20}>
-                                                    <defs>
-                                                        <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-                                                            <stop offset="0%" stopColor="#8b5cf6" />
-                                                            <stop offset="100%" stopColor="#3b82f6" />
-                                                        </linearGradient>
-                                                    </defs>
-                                                    <CartesianGrid strokeDasharray="3 3" stroke={T.divider} />
-                                                    <XAxis dataKey="date" tick={{ fill: T.textFaint, fontSize: 10 }} axisLine={false} tickLine={false} />
-                                                    <YAxis allowDecimals={false} tick={{ fill: T.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
-                                                    <Tooltip contentStyle={tooltipStyle} />
-                                                    <Bar dataKey="calls" fill="url(#barGrad)" radius={[4, 4, 0, 0]} />
-                                                </BarChart>
-                                            </ResponsiveContainer>
-                                        </div>
-                                    )}
-                                </Panel>
-                            </div>
+                                    </div>
+                                )}
+                            </Panel>
 
                             {/* ── SCORE DISTRIBUTION ── */}
                             {!loading && rangedCalls.some(c => c.overallScore != null) && (
@@ -817,7 +830,7 @@ export default function AnalyticsPage() {
                             )}
 
                             {/* ── BUYING INTENT (only rendered if data is present on calls) ── */}
-                            {!loading && Object.keys(intentCounts).length > 0 && (
+                            {!loading && !analyticsLoading && Object.keys(intentCounts).length > 0 && (
                                 <div>
                                     <div className="mb-3"><SectionLabel icon={Rocket} tone="#34d399">Buying Intent</SectionLabel></div>
                                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -843,7 +856,7 @@ export default function AnalyticsPage() {
                             )}
 
                             {/* ── AI INSIGHTS PANEL — generated only from real, already-loaded stats ── */}
-                            {!loading && total > 0 && (
+                            {!loading && !analyticsLoading && total > 0 && (
                                 <div className="rounded-2xl border p-6 relative overflow-hidden"
                                     style={{ background: "linear-gradient(135deg, rgba(139,92,246,0.1), rgba(59,130,246,0.05))", borderColor: "rgba(139,92,246,0.25)" }}>
                                     <div className="absolute -top-16 -right-16 w-56 h-56 rounded-full blur-3xl pointer-events-none"
@@ -872,11 +885,11 @@ export default function AnalyticsPage() {
                                                 <div>
                                                     <p className="text-xs font-bold uppercase tracking-wide text-amber-400 mb-1">Top Trend</p>
                                                     <p className="text-sm leading-relaxed" style={{ color: T.textMuted }}>
-                                                        {seriesTrend(scoreSeries) == null
+                                                        {scoreTrendPct == null
                                                             ? "Not enough recent calls yet to establish a score trend."
-                                                            : seriesTrend(scoreSeries) >= 0
-                                                                ? <>Scores are trending <span className="font-bold" style={{ color: T.text }}>up {seriesTrend(scoreSeries).toFixed(1)}%</span> over the most recent calls.</>
-                                                                : <>Scores are trending <span className="font-bold" style={{ color: T.text }}>down {Math.abs(seriesTrend(scoreSeries)).toFixed(1)}%</span> over the most recent calls.</>}
+                                                            : scoreTrendPct >= 0
+                                                                ? <>Scores are trending <span className="font-bold" style={{ color: T.text }}>up {scoreTrendPct.toFixed(1)}%</span> over the most recent calls.</>
+                                                                : <>Scores are trending <span className="font-bold" style={{ color: T.text }}>down {Math.abs(scoreTrendPct).toFixed(1)}%</span> over the most recent calls.</>}
                                                     </p>
                                                 </div>
                                             </div>
@@ -908,7 +921,7 @@ export default function AnalyticsPage() {
                             )}
 
                             {/* ── KEYWORD CLOUD ── */}
-                            {!loading && topKw.length > 0 && (
+                            {!loading && !analyticsLoading && topKw.length > 0 && (
                                 <Panel T={T}>
                                     <SectionLabel icon={KeyRound} tone="#a1a1aa">Top Keywords</SectionLabel>
 

@@ -3,8 +3,6 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { parseInsights } from "../utils/insightsFormatter.js";
 import {
     PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
-    AreaChart, Area, XAxis, YAxis, CartesianGrid,
-    RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
 } from "recharts";
 import api, { getUser, clearSession } from "../services/api.js";
 import { logoutAndRedirect } from "../components/ProtectedRoute";
@@ -57,6 +55,19 @@ function parseList(str) {
         }
     }
     return str.split(/,|\n/).map(s => s.replace(/^[\s*\-•]+/, "").trim()).filter(Boolean);
+}
+
+/**
+ * Recommendations now come from the backend as plain strings
+ * (DashboardStatsResponse.recommendations). This only chooses which icon/
+ * color to render next to each line — the wording and the thresholds behind
+ * it (negative %, avg score, weakest dimension) are entirely server-side.
+ */
+function recommendationIconFor(text) {
+    if (/landed negative/i.test(text)) return { Icon: ShieldAlert, color: "#ef4444" };
+    if (/Average QA score/i.test(text)) return { Icon: Gauge, color: "#f59e0b" };
+    if (/lowest-scoring dimension/i.test(text)) return { Icon: Target, color: "#3b82f6" };
+    return { Icon: Flame, color: "#10b981" };
 }
 
 const SENT_CONFIG = {
@@ -241,7 +252,7 @@ function TrendBadge({ pct }) {
 }
 
 /** Premium KPI card: value, sparkline, trend, icon, gradient accent — all from real data. */
-function KPICard({ label, value, sub, Icon, accent = "#8b5cf6", series, trendPct, T }) {
+function KPICard({ label, value, sub, Icon, accent = "#8b5cf6", series, trendPct, T, compact = false }) {
     return (
         <div className="group relative overflow-hidden rounded-2xl border transition-all duration-300 cursor-default"
             style={{ background: T.panel, borderColor: T.panelBorder }}
@@ -257,21 +268,21 @@ function KPICard({ label, value, sub, Icon, accent = "#8b5cf6", series, trendPct
             }}>
             <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
                 style={{ background: `radial-gradient(ellipse at 15% 0%, ${accent}14 0%, transparent 60%)` }} />
-            <div className="p-5">
-                <div className="flex items-start justify-between mb-3.5">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+            <div className={compact ? "p-3.5" : "p-5"}>
+                <div className={`flex items-start justify-between ${compact ? "mb-2" : "mb-3.5"}`}>
+                    <div className={`${compact ? "w-7 h-7" : "w-10 h-10"} rounded-xl flex items-center justify-center flex-shrink-0`}
                         style={{ background: `${accent}18`, border: `1px solid ${accent}30` }}>
-                        {Icon && <Icon size={18} style={{ color: accent }} strokeWidth={2} />}
+                        {Icon && <Icon size={compact ? 13 : 18} style={{ color: accent }} strokeWidth={2} />}
                     </div>
-                    <TrendBadge pct={trendPct} />
+                    {!compact && <TrendBadge pct={trendPct} />}
                 </div>
-                <p className="text-3xl font-black mb-1 tracking-tight" style={{ color: T.text }}>{value}</p>
+                <p className={`${compact ? "text-xl" : "text-3xl"} font-black mb-1 tracking-tight`} style={{ color: T.text }}>{value}</p>
                 <div className="flex items-end justify-between gap-2">
                     <div>
                         <p className="text-xs font-medium uppercase tracking-wider" style={{ color: T.textMuted }}>{label}</p>
-                        {sub && <p className="text-[10px] mt-0.5" style={{ color: T.textFaint }}>{sub}</p>}
+                        {sub && !compact && <p className="text-[10px] mt-0.5" style={{ color: T.textFaint }}>{sub}</p>}
                     </div>
-                    <Sparkline series={series} color={accent} width={72} height={28} />
+                    {!compact && <Sparkline series={series} color={accent} width={72} height={28} />}
                 </div>
             </div>
         </div>
@@ -860,6 +871,15 @@ export default function DashboardPage() {
     const [playingId, setPlayingId] = useState(null);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+    /* ── Server-computed KPIs from GET /api/dashboard/employee. This
+       replaces the client-side average/percentage/trend/recommendation
+       math that used to live entirely in this file — see fetchDashboardStats
+       below. `calls` (from /api/calls/my-calls) is still fetched separately
+       and still drives Recent Calls, Search, and the filter popover. ───── */
+    const [dashboardStats, setDashboardStats] = useState(null);
+    const [dashboardLoading, setDashboardLoading] = useState(true);
+    const [dashboardError, setDashboardError] = useState(null);
+
     /* ── New: presentation-only UI state. None of this touches data
        fetching, routing, or the state above — it only changes how the
        already-fetched `calls` are displayed. ─────────────────────────── */
@@ -869,7 +889,6 @@ export default function DashboardPage() {
     const [searchOpen, setSearchOpen] = useState(false);
     const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
     const [dateRange, setDateRange] = useState("30d"); // 7d | 30d | all — filters the local `calls` array only
-    const [chartGranularity, setChartGranularity] = useState("Daily"); // Daily | Weekly
 
     /* ── Filter popover state. `filters` only narrows the already-fetched
        `calls` array (same client-side pattern as `dateRange`) — no new
@@ -917,6 +936,26 @@ export default function DashboardPage() {
     }, []);
 
     useEffect(() => { fetchCalls(); }, [fetchCalls]);
+
+    /* ── Fetch server-computed KPIs, keyed on the same 7d/30d/all range the
+       date-range selector already exposes. Independent request from
+       fetchCalls() above — Recent Calls/Search don't need to wait on it and
+       vice versa. ─────────────────────────────────────────────────────── */
+    const fetchDashboardStats = useCallback(async (range) => {
+        setDashboardLoading(true);
+        setDashboardError(null);
+        try {
+            const res = await api.get(`/api/dashboard/employee?range=${range}`);
+            setDashboardStats(res.data);
+        } catch (err) {
+            console.error("Failed to fetch dashboard stats:", err);
+            setDashboardError("Unable to load dashboard insights. Please try again.");
+        } finally {
+            setDashboardLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { fetchDashboardStats(dateRange); }, [fetchDashboardStats, dateRange]);
 
     useEffect(() => {
         const handler = () => setProfileOpen(false);
@@ -998,6 +1037,7 @@ export default function DashboardPage() {
 
     const handleUploadSuccess = () => {
         fetchCalls();
+        fetchDashboardStats(dateRange);
         setToast({ message: "Call uploaded & analysed successfully!", type: "success" });
     };
 
@@ -1066,51 +1106,31 @@ export default function DashboardPage() {
        over `filteredCalls` so Date Range AND Filters both actually do
        something and every card below stays in sync. */
     const totalCalls = filteredCalls.length;
-    const positiveCalls = filteredCalls.filter(c => c.sentiment === "POSITIVE").length;
-    const negativeCalls = filteredCalls.filter(c => c.sentiment === "NEGATIVE").length;
-    const neutralCalls = filteredCalls.filter(c => c.sentiment === "NEUTRAL").length;
-    const avgScore = totalCalls > 0 ? (filteredCalls.reduce((s, c) => s + (c.overallScore || 0), 0) / totalCalls).toFixed(1) : 0;
-    const bestScore = totalCalls > 0 ? Math.max(...filteredCalls.map(c => c.overallScore || 0)) : 0;
-    const positivePercent = totalCalls > 0 ? ((positiveCalls / totalCalls) * 100).toFixed(1) : 0;
-    const negativePercent = totalCalls > 0 ? ((negativeCalls / totalCalls) * 100).toFixed(1) : 0;
-    const neutralPercent = totalCalls > 0 ? ((neutralCalls / totalCalls) * 100).toFixed(1) : 0;
 
-    const sentimentCounts = { POSITIVE: positiveCalls, NEGATIVE: negativeCalls, NEUTRAL: neutralCalls };
-    const dominantSentiment = totalCalls > 0
-        ? Object.keys(sentimentCounts).reduce((a, b) => sentimentCounts[a] > sentimentCounts[b] ? a : b)
-        : null;
+    /* ── Everything below through `chartData` used to be computed here from
+       `filteredCalls`. It's now read directly from GET /api/dashboard/employee
+       (`dashboardStats`), which is range-filtered (7d/30d/all) but NOT
+       narrowed by the local sentiment/QA-score/outcome/call-type filters —
+       those still only narrow the Recent Calls list below, per the backend
+       owning averages/percentages. `statsTotalCalls` is the backend's own
+       total and is what the KPI row displays; the `totalCalls` above (from
+       `filteredCalls`) keeps driving Recent Calls, the empty-state gate, and
+       the sidebar/notifications counts exactly as before. ───────────────── */
+    const statsTotalCalls = dashboardStats?.totalCalls ?? 0;
+    const avgScore = dashboardStats && dashboardStats.totalCalls > 0 ? dashboardStats.avgScore.toFixed(1) : 0;
+    const positiveCalls = dashboardStats?.positiveCalls ?? 0;
+    const positivePercent = dashboardStats && dashboardStats.totalCalls > 0 ? dashboardStats.positivePercent.toFixed(1) : 0;
 
-    const chartData = [
-        { name: "Positive", value: positiveCalls },
-        { name: "Neutral", value: neutralCalls },
-        { name: "Negative", value: negativeCalls },
-    ];
-
+    /* timelineMap now exists only to feed the "Total Calls" KPI sparkline
+       below — the full Calls Over Time chart it used to power moved to
+       Analytics (merged into its Score Trend combo chart), since a daily
+       volume chart is a trend question, not a "what do I do today" one. */
     const timelineMap = {};
     filteredCalls.forEach(c => {
         if (!c.createdAt) return;
-        let key;
-        if (chartGranularity === "Weekly") {
-            const d = new Date(c.createdAt);
-            const weekStart = new Date(d);
-            weekStart.setDate(d.getDate() - d.getDay());
-            key = weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-        } else {
-            key = new Date(c.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-        }
+        const key = new Date(c.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
         timelineMap[key] = (timelineMap[key] || 0) + 1;
     });
-
-    const timelineData = Object.entries(timelineMap).slice(-12).map(([date, count]) => ({ date, calls: count }));
-
-    const allKeywords = filteredCalls.flatMap(c => c.keywords ? c.keywords.split(",") : []).map(k => k.trim()).filter(Boolean);
-    const kwFreq = {};
-    allKeywords.forEach(k => { kwFreq[k] = (kwFreq[k] || 0) + 1; });
-    const topKeywords = Object.entries(kwFreq).sort((a, b) => b[1] - a[1]).slice(0, 12);
-
-    const avgQA = (key) => totalCalls > 0
-        ? Math.round(filteredCalls.reduce((s, c) => s + (c[key] || 0), 0) / filteredCalls.length)
-        : 0;
 
     const recentCalls = filteredCalls.slice(0, 8);
 
@@ -1179,52 +1199,21 @@ export default function DashboardPage() {
     const markNotifRead = (id) => setReadNotifIds(prev => new Set(prev).add(id));
     const markAllNotifsRead = () => setReadNotifIds(new Set(notifications.map(n => n.id)));
 
-    /* ── Mission-control derivations — all computed from `filteredCalls`,
-       zero new endpoints. ───────────────────────────────────────────── */
-    const needsAttention = filteredCalls
-        .filter(c => c.sentiment === "NEGATIVE" || (c.overallScore != null && c.overallScore < 50))
-        .slice(0, 6)
-        .map(c => {
-            let risk = "medium";
-            if ((c.overallScore != null && c.overallScore < 35) || (c.sentiment === "NEGATIVE" && c.overallScore != null && c.overallScore < 50)) risk = "high";
-            else if (c.sentiment === "NEGATIVE" || (c.overallScore != null && c.overallScore < 50)) risk = "medium";
-            else risk = "low";
-            return { ...c, _risk: risk };
-        });
+    /* ── Mission-control derivations — needsAttention, the weakest QA
+       dimension, recommendations, and the AI briefing are now all owned by
+       GET /api/dashboard/employee. Nothing here recomputes them; this only
+       reshapes the response into what the JSX below already expects. ──── */
+    const needsAttention = dashboardStats?.needsAttention ?? [];
 
-    const qaDims = [
-        { label: "Communication", key: "communication", color: "#8b5cf6" },
-        { label: "Problem Resolution", key: "problemResolution", color: "#3b82f6" },
-        { label: "Professionalism", key: "professionalism", color: "#10b981" },
-        { label: "Cust. Satisfaction", key: "customerSatisfaction", color: "#f59e0b" },
-    ];
-    const weakestDim = totalCalls > 0
-        ? qaDims.reduce((a, b) => (avgQA(a.key) || 100) <= (avgQA(b.key) || 100) ? a : b)
-        : null;
+    // Backend sends plain strings; recommendationIconFor only picks the icon/color.
+    const recommendations = (dashboardStats?.recommendations ?? []).map(text => ({
+        ...recommendationIconFor(text),
+        text,
+    }));
 
-    const radarData = qaDims.map(d => ({ dimension: d.label, score: avgQA(d.key) }));
-
-    const recommendations = [];
-    if (totalCalls > 0) {
-        if (Number(negativePercent) >= 20) {
-            recommendations.push({ Icon: ShieldAlert, color: "#ef4444", text: `${negativeCalls} call${negativeCalls !== 1 ? "s" : ""} landed negative — review them for coaching opportunities before they repeat.` });
-        }
-        if (Number(avgScore) < 65) {
-            recommendations.push({ Icon: Gauge, color: "#f59e0b", text: `Average QA score is ${avgScore}. Aim for 70+ by tightening up the weakest dimension below.` });
-        }
-        if (weakestDim && avgQA(weakestDim.key) < 70) {
-            recommendations.push({ Icon: Target, color: "#3b82f6", text: `${weakestDim.label} is your lowest-scoring dimension at ${avgQA(weakestDim.key)}/100 — focus here first.` });
-        }
-        if (recommendations.length === 0) {
-            recommendations.push({ Icon: Flame, color: "#10b981", text: `Strong stretch — sentiment and QA scores are healthy across ${totalCalls} analysed call${totalCalls !== 1 ? "s" : ""}.` });
-        }
-    }
-
-    const briefing = totalCalls === 0
-        ? "No calls analysed yet in this range. Upload a recording and I'll start briefing you here."
-        : `${totalCalls} call${totalCalls !== 1 ? "s" : ""} analysed, averaging a ${avgScore} QA score. ` +
-          `Sentiment is running mostly ${SENT_CONFIG[dominantSentiment]?.label.toLowerCase() ?? "neutral"}` +
-          `${needsAttention.length > 0 ? `, with ${needsAttention.length} conversation${needsAttention.length !== 1 ? "s" : ""} that need${needsAttention.length === 1 ? "s" : ""} your attention.` : ", and nothing urgent is waiting on you."}`;
+    const briefing = dashboardError
+        ? "Unable to load your AI briefing right now — please try again shortly."
+        : (dashboardStats?.briefing ?? "No calls analysed yet in this range. Upload a recording and I'll start briefing you here.");
 
     /* Sparkline series + trend for the KPI row — daily aggregates from real calls. */
     const callsSeries = Object.entries(timelineMap).slice(-8).map(([date, count]) => ({ date, value: count }));
@@ -1722,145 +1711,39 @@ export default function DashboardPage() {
                     )}
 
                     {/* ══════════════════════════════════════════════════
-                        MAIN 12-COL EXECUTIVE GRID
+                        MISSION CONTROL — "what should I do right now?"
+                        Order: AI Briefing (hero) → today's snapshot (small,
+                        passive) → Critical Alerts → Top Calls (small strip).
+                        Nothing here is a trend/report — that's Analytics' job.
                         ══════════════════════════════════════════════════ */}
                     {(loading || totalCalls > 0) && (
-                        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+                        <div className="space-y-5">
 
-                            {/* ── LEFT COLUMN (8/12) ── */}
-                            <div className="xl:col-span-8 space-y-5">
-
-                                {/* KPI row */}
-                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-                                    {loading ? (
-                                        Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} T={T} className="h-36" />)
-                                    ) : (
-                                        <>
-                                            <KPICard T={T} label="Total Calls" value={totalCalls} Icon={Phone} accent="#8b5cf6"
-                                                series={callsSeries} trendPct={seriesTrend(callsSeries)} sub={`${dateRange === "all" ? "all time" : dateRange === "7d" ? "last 7 days" : "last 30 days"}`} />
-                                            <KPICard T={T} label="Avg QA Score" value={avgScore} Icon={Star} accent="#3b82f6"
-                                                series={scoreSeries} trendPct={seriesTrend(scoreSeries)}
-                                                sub={Number(avgScore) >= 70 ? "Good" : Number(avgScore) >= 50 ? "Fair" : "Needs focus"} />
-                                            <KPICard T={T} label="Positive Sentiment" value={`${positivePercent}%`} Icon={TrendingUp} accent="#10b981"
-                                                series={positiveSeries} trendPct={seriesTrend(positiveSeries)} sub={`${positiveCalls} of ${totalCalls} calls`} />
-                                            <KPICard T={T} label="Customer Satisfaction" value={avgQA("customerSatisfaction") || "–"} Icon={Award} accent="#f59e0b"
-                                                series={csatSeries} trendPct={seriesTrend(csatSeries)} sub="avg score /100" />
-                                        </>
-                                    )}
-                                </div>
-
-                                {/* Hero analytics chart */}
-                                <Panel T={T}>
-                                    <PanelHeader T={T} title="Calls Over Time" sub="Upload & analysis volume"
-                                        right={
-                                            <div className="flex rounded-lg overflow-hidden" style={{ border: `1px solid ${T.panelBorder}` }}>
-                                                {["Daily", "Weekly"].map(g => (
-                                                    <button key={g} onClick={() => setChartGranularity(g)}
-                                                        className="px-3 py-1.5 text-xs font-semibold transition-colors"
-                                                        style={g === chartGranularity
-                                                            ? { background: "rgba(139,92,246,0.18)", color: "#c4b5fd" }
-                                                            : { background: "transparent", color: T.textFaint }}>
-                                                        {g}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        }
-                                    />
-                                    {loading ? (
-                                        <Skeleton T={T} className="h-64" />
-                                    ) : timelineData.length === 0 ? (
-                                        <div className="flex flex-col items-center justify-center h-64 text-sm gap-2" style={{ color: T.textFaint }}>
-                                            <Activity size={28} />
-                                            <span>Upload more calls to see the timeline</span>
-                                        </div>
-                                    ) : (
-                                        <ResponsiveContainer width="100%" height={260}>
-                                            <AreaChart data={timelineData}>
-                                                <defs>
-                                                    <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                                                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.35} />
-                                                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                                                    </linearGradient>
-                                                </defs>
-                                                <CartesianGrid strokeDasharray="3 3" stroke={T.divider} />
-                                                <XAxis dataKey="date" tick={{ fill: T.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
-                                                <YAxis tick={{ fill: T.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                                                <Tooltip contentStyle={{ background: "#0a0a1f", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "12px", color: "#fff", fontSize: "12px" }} />
-                                                <Area type="monotone" dataKey="calls" stroke="#8b5cf6" strokeWidth={2.5} fill="url(#areaGrad)"
-                                                    dot={{ fill: "#8b5cf6", r: 3.5, strokeWidth: 0 }} activeDot={{ r: 5.5, strokeWidth: 2, stroke: "#0a0a1f" }} />
-                                            </AreaChart>
-                                        </ResponsiveContainer>
-                                    )}
-                                </Panel>
-
-                                {/* Critical Alerts */}
-                                <Panel T={T} style={needsAttention.length > 0 ? { background: "rgba(239,68,68,0.035)", borderColor: "rgba(239,68,68,0.2)" } : {}}>
-                                    <PanelHeader T={T}
-                                        title={<span className="flex items-center gap-2"><ShieldAlert size={15} className="text-red-400" /> Critical Alerts</span>}
-                                        sub={loading ? "Scanning conversations…" : needsAttention.length > 0 ? `${needsAttention.length} conversation${needsAttention.length !== 1 ? "s" : ""} need review` : "Nothing needs your attention right now"}
-                                    />
-                                    {loading ? (
-                                        <div className="space-y-2"><Skeleton T={T} className="h-14" /><Skeleton T={T} className="h-14" /></div>
-                                    ) : needsAttention.length === 0 ? (
-                                        <div className="flex items-center gap-3 py-6 justify-center" style={{ color: T.textFaint }}>
-                                            <CheckCircle size={18} className="text-emerald-400" />
-                                            <span className="text-sm">All clear — your team is performing well.</span>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            {needsAttention.map(call => {
-                                                const risk = RISK_CFG[call._risk];
-                                                return (
-                                                    <Link key={call.id} to={`/calls/${call.id}`}
-                                                        className="flex items-center gap-3 p-3.5 rounded-xl transition-all group"
-                                                        style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}
-                                                        onMouseEnter={e => { e.currentTarget.style.borderColor = `${risk.color}55`; }}
-                                                        onMouseLeave={e => { e.currentTarget.style.borderColor = T.panelBorder; }}>
-                                                        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: risk.bg, border: `1px solid ${risk.border}` }}>
-                                                            <risk.Icon size={16} style={{ color: risk.color }} />
-                                                        </div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <p className="text-sm font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p>
-                                                            <p className="text-xs truncate" style={{ color: T.textFaint }}>
-                                                                {call.overallScore != null ? `Scored ${call.overallScore}/100` : "Negative sentiment"} · {timeAgo(call.createdAt)}
-                                                            </p>
-                                                        </div>
-                                                        <span className="text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0" style={{ background: risk.bg, color: risk.color }}>
-                                                            {risk.label}
-                                                        </span>
-                                                        <ArrowUpRight size={13} className="flex-shrink-0 transition-colors" style={{ color: T.textFaint }} />
-                                                    </Link>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-                                </Panel>
-                            </div>
-
-                            {/* ── RIGHT COLUMN (4/12) ── */}
-                            <div className="xl:col-span-4 space-y-5">
-
-                                {/* AI Summary — the centerpiece */}
-                                <div className="relative overflow-hidden rounded-2xl p-5"
-                                    style={{ background: "linear-gradient(160deg, rgba(124,58,237,0.18) 0%, rgba(37,99,235,0.1) 100%)", border: "1px solid rgba(139,92,246,0.28)" }}>
-                                    <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-20 blur-3xl pointer-events-none" style={{ background: "radial-gradient(circle, #8b5cf6, transparent)" }} />
-                                    <div className="relative">
+                            {/* AI Briefing — the hero. This is the one thing on
+                                Dashboard that does real "so what" synthesis, so
+                                it leads the page full-width instead of sharing
+                                a side column with 3 other panels. */}
+                            <div className="relative overflow-hidden rounded-2xl p-6"
+                                style={{ background: "linear-gradient(160deg, rgba(124,58,237,0.18) 0%, rgba(37,99,235,0.1) 100%)", border: "1px solid rgba(139,92,246,0.28)" }}>
+                                <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full opacity-20 blur-3xl pointer-events-none" style={{ background: "radial-gradient(circle, #8b5cf6, transparent)" }} />
+                                <div className="relative grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    <div className="lg:col-span-2">
                                         <div className="flex items-center justify-between mb-4">
                                             <div className="flex items-center gap-2">
                                                 <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "rgba(139,92,246,0.25)", border: "1px solid rgba(139,92,246,0.4)" }}>
                                                     <Sparkles size={13} className="text-violet-200" />
                                                 </div>
-                                                <span className="text-sm font-bold text-white">Today's AI Summary</span>
+                                                <span className="text-sm font-bold text-white">Today's AI Briefing</span>
                                             </div>
                                             <LivePulse label="Live" />
                                         </div>
 
-                                        <p className="text-sm leading-relaxed mb-4" style={{ color: "rgba(255,255,255,0.85)" }}>
-                                            {loading ? "Pulling together your latest conversation data…" : briefing}
+                                        <p className="text-[0.95rem] leading-relaxed mb-4" style={{ color: "rgba(255,255,255,0.88)" }}>
+                                            {(loading || dashboardLoading) ? "Pulling together your latest conversation data…" : briefing}
                                         </p>
 
-                                        {!loading && (
-                                            <div className="space-y-2 mb-4">
+                                        {!loading && !dashboardLoading && (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                                 {recommendations.map((r, i) => (
                                                     <div key={i} className="flex items-start gap-2.5 p-2.5 rounded-xl" style={{ background: "rgba(0,0,0,0.18)" }}>
                                                         <r.Icon size={14} className="mt-0.5 flex-shrink-0" style={{ color: r.color }} />
@@ -1869,73 +1752,118 @@ export default function DashboardPage() {
                                                 ))}
                                             </div>
                                         )}
+                                    </div>
 
-                                        <div className="flex items-center justify-between pt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.12)" }}>
-                                            <div className="flex items-center gap-1.5">
-                                                <span className="text-[10px] font-medium" style={{ color: "rgba(255,255,255,0.5)" }}>Confidence</span>
-                                                <span className="text-xs font-black text-white">{totalCalls > 0 ? "92%" : "–"}</span>
-                                            </div>
-                                            <Link to="/analytics" className="flex items-center gap-1 text-xs font-bold text-white hover:gap-1.5 transition-all">
-                                                View Full Report <ArrowRight size={12} />
-                                            </Link>
+                                    {/* Confidence + CTA — its own column now that there's room */}
+                                    <div className="flex lg:flex-col items-center lg:items-stretch justify-between gap-4 lg:border-l lg:pl-6" style={{ borderColor: "rgba(255,255,255,0.12)" }}>
+                                        <div className="text-center lg:text-left">
+                                            <p className="text-[10px] font-medium uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.5)" }}>Confidence</p>
+                                            <p className="text-3xl font-black text-white">{totalCalls > 0 ? "92%" : "–"}</p>
                                         </div>
+                                        <Link to="/analytics" className="inline-flex items-center justify-center gap-1.5 text-xs font-bold text-white px-4 py-2.5 rounded-xl hover:gap-2 transition-all flex-shrink-0"
+                                            style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)" }}>
+                                            View Full Report <ArrowRight size={12} />
+                                        </Link>
                                     </div>
                                 </div>
+                            </div>
 
-                                {/* Performance Radar */}
-                                <Panel T={T}>
-                                    <PanelHeader T={T} title="Performance Overview" sub="Average across QA dimensions" />
-                                    {loading ? (
-                                        <Skeleton T={T} className="h-56" />
+                            {/* Today's snapshot — small, passive context underneath the
+                                briefing, not competing for primary attention. Same data
+                                Analytics shows, but here it's just "where things stand
+                                right now," not a trend to analyse. */}
+                            <div>
+                                <div className="mb-2.5">
+                                    <SectionLabel T={T} icon={Gauge} tone="#a1a1aa">Today's Snapshot</SectionLabel>
+                                </div>
+                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+                                    {(loading || dashboardLoading) ? (
+                                        Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} T={T} className="h-24" />)
                                     ) : (
-                                        <div className="flex flex-col items-center">
-                                            <ResponsiveContainer width="100%" height={200}>
-                                                <RadarChart data={radarData} outerRadius="72%">
-                                                    <PolarGrid stroke={T.divider} />
-                                                    <PolarAngleAxis dataKey="dimension" tick={{ fill: T.textFaint, fontSize: 9.5 }} />
-                                                    <PolarRadiusAxis angle={90} domain={[0, 100]} tick={false} axisLine={false} />
-                                                    <Radar dataKey="score" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.35}
-                                                        strokeWidth={2} dot={{ r: 3, fill: "#8b5cf6" }} />
-                                                </RadarChart>
-                                            </ResponsiveContainer>
-                                            <div className="flex items-center gap-4 mt-2">
-                                                <ScoreRing score={Number(avgScore)} size={64} stroke={5} textColor={themeMode === "dark" ? "white" : "#0f172a"} />
-                                                <div>
-                                                    <p className="text-2xl font-black" style={{ color: T.text }}>{avgScore}</p>
-                                                    <p className="text-[10px] font-medium" style={{ color: T.textMuted }}>Overall Score</p>
-                                                </div>
-                                            </div>
-                                        </div>
+                                        <>
+                                            <KPICard T={T} label="Total Calls" value={statsTotalCalls} Icon={Phone} accent="#8b5cf6"
+                                                series={callsSeries} trendPct={seriesTrend(callsSeries)} sub={`${dateRange === "all" ? "all time" : dateRange === "7d" ? "last 7 days" : "last 30 days"}`} compact />
+                                            <KPICard T={T} label="Avg QA Score" value={avgScore} Icon={Star} accent="#3b82f6"
+                                                series={scoreSeries} trendPct={seriesTrend(scoreSeries)}
+                                                sub={Number(avgScore) >= 70 ? "Good" : Number(avgScore) >= 50 ? "Fair" : "Needs focus"} compact />
+                                            <KPICard T={T} label="Positive Sentiment" value={`${positivePercent}%`} Icon={TrendingUp} accent="#10b981"
+                                                series={positiveSeries} trendPct={seriesTrend(positiveSeries)} sub={`${positiveCalls} of ${statsTotalCalls} calls`} compact />
+                                            <KPICard T={T} label="Customer Satisfaction" value={dashboardStats?.avgCustomerSatisfaction || "–"} Icon={Award} accent="#f59e0b"
+                                                series={csatSeries} trendPct={seriesTrend(csatSeries)} sub="avg score /100" compact />
+                                        </>
                                     )}
-                                </Panel>
+                                </div>
+                            </div>
 
-                                {/* Top Calls — stands in for a rep leaderboard (no per-rep data in this model) */}
-                                <Panel T={T}>
-                                    <PanelHeader T={T} title="Top Calls" sub="Highest-scoring conversations" />
-                                    {loading ? (
-                                        <div className="space-y-2"><Skeleton T={T} className="h-14" /><Skeleton T={T} className="h-14" /></div>
-                                    ) : topCalls.length === 0 ? (
-                                        <p className="text-sm text-center py-6" style={{ color: T.textFaint }}>No scored calls yet</p>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            {topCalls.map((call, i) => (
+                            {/* Critical Alerts — full width, never buried in a side column */}
+                            <Panel T={T} style={needsAttention.length > 0 ? { background: "rgba(239,68,68,0.035)", borderColor: "rgba(239,68,68,0.2)" } : {}}>
+                                <PanelHeader T={T}
+                                    title={<span className="flex items-center gap-2"><ShieldAlert size={15} className="text-red-400" /> Critical Alerts</span>}
+                                    sub={(loading || dashboardLoading) ? "Scanning conversations…" : dashboardError ? "Unable to load right now" : needsAttention.length > 0 ? `${needsAttention.length} conversation${needsAttention.length !== 1 ? "s" : ""} need review` : "Nothing needs your attention right now"}
+                                />
+                                {(loading || dashboardLoading) ? (
+                                    <div className="space-y-2"><Skeleton T={T} className="h-14" /><Skeleton T={T} className="h-14" /></div>
+                                ) : needsAttention.length === 0 ? (
+                                    <div className="flex items-center gap-3 py-6 justify-center" style={{ color: T.textFaint }}>
+                                        <CheckCircle size={18} className="text-emerald-400" />
+                                        <span className="text-sm">All clear — your team is performing well.</span>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        {needsAttention.map(call => {
+                                            const risk = RISK_CFG[call.riskLevel];
+                                            return (
                                                 <Link key={call.id} to={`/calls/${call.id}`}
-                                                    className="flex items-center gap-3 p-3 rounded-xl transition-all"
-                                                    style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}>
-                                                    <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: `${MEDALS[i]}22`, border: `1px solid ${MEDALS[i]}55` }}>
-                                                        {i === 0 ? <Crown size={13} style={{ color: MEDALS[i] }} /> : <Medal size={12} style={{ color: MEDALS[i] }} />}
+                                                    className="flex items-center gap-3 p-3.5 rounded-xl transition-all group"
+                                                    style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}
+                                                    onMouseEnter={e => { e.currentTarget.style.borderColor = `${risk.color}55`; }}
+                                                    onMouseLeave={e => { e.currentTarget.style.borderColor = T.panelBorder; }}>
+                                                    <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: risk.bg, border: `1px solid ${risk.border}` }}>
+                                                        <risk.Icon size={16} style={{ color: risk.color }} />
                                                     </div>
                                                     <div className="flex-1 min-w-0">
-                                                        <p className="text-xs font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p>
-                                                        <p className="text-[10px] truncate" style={{ color: T.textFaint }}>{timeAgo(call.createdAt)}</p>
+                                                        <p className="text-sm font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p>
+                                                        <p className="text-xs truncate" style={{ color: T.textFaint }}>
+                                                            {call.overallScore != null ? `Scored ${call.overallScore}/100` : "Negative sentiment"} · {timeAgo(call.createdAt)}
+                                                        </p>
                                                     </div>
-                                                    <span className="text-sm font-black flex-shrink-0" style={{ color: "#8b5cf6" }}>{call.overallScore}</span>
+                                                    <span className="text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0" style={{ background: risk.bg, color: risk.color }}>
+                                                        {risk.label}
+                                                    </span>
+                                                    <ArrowUpRight size={13} className="flex-shrink-0 transition-colors" style={{ color: T.textFaint }} />
                                                 </Link>
-                                            ))}
-                                        </div>
-                                    )}
-                                </Panel>
-                            </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </Panel>
+
+                            {/* Top Calls — demoted to a small horizontal strip (recognition,
+                                not core workflow), instead of a tall column fighting the
+                                radar/AI-summary column it used to sit in. */}
+                            {!loading && topCalls.length > 0 && (
+                                <div>
+                                    <div className="mb-2.5">
+                                        <SectionLabel T={T} icon={Crown} tone="#f59e0b">Top Calls This Period</SectionLabel>
+                                    </div>
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                        {topCalls.map((call, i) => (
+                                            <Link key={call.id} to={`/calls/${call.id}`}
+                                                className="flex items-center gap-2.5 p-3 rounded-xl transition-all"
+                                                style={{ background: T.panel, border: `1px solid ${T.panelBorder}` }}>
+                                                <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: `${MEDALS[i]}22`, border: `1px solid ${MEDALS[i]}55` }}>
+                                                    {i === 0 ? <Crown size={13} style={{ color: MEDALS[i] }} /> : <Medal size={12} style={{ color: MEDALS[i] }} />}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-xs font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p>
+                                                    <p className="text-[10px] truncate" style={{ color: T.textFaint }}>{timeAgo(call.createdAt)}</p>
+                                                </div>
+                                                <span className="text-sm font-black flex-shrink-0" style={{ color: "#8b5cf6" }}>{call.overallScore}</span>
+                                            </Link>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -2014,35 +1942,6 @@ export default function DashboardPage() {
                                         )}
                                     </div>
                                 </div>
-                            </div>
-
-                            {/* Sentiment + Keyword Intelligence */}
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                                <Panel T={T}>
-                                    <PanelHeader T={T} title="Sentiment Distribution" sub="Across all analysed calls"
-                                        right={<span className="text-xs font-bold px-3 py-1 rounded-full" style={{ background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.2)", color: "#a78bfa" }}>{totalCalls} calls</span>}
-                                    />
-                                    {loading ? <Skeleton T={T} className="h-56" /> : <SentimentChart data={chartData} total={totalCalls} T={T} />}
-                                </Panel>
-
-                                {topKeywords.length > 0 && (
-                                    <Panel T={T}>
-                                        <PanelHeader T={T} title="Keyword Intelligence" sub={`${Object.keys(kwFreq).length} unique keywords`}
-                                            right={<span className="text-xs font-bold px-3 py-1 rounded-full" style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", color: "#60a5fa" }}>AI Extracted</span>}
-                                        />
-                                        <div className="flex flex-wrap gap-2">
-                                            {topKeywords.slice(0, 10).map(([kw, cnt], i) => {
-                                                const opacity = 0.45 + ((topKeywords.length - i) / topKeywords.length) * 0.55;
-                                                return (
-                                                    <span key={kw} className="px-3 py-1.5 rounded-full font-semibold border transition-all hover:scale-105 cursor-default"
-                                                        style={{ background: `rgba(139,92,246,${opacity * 0.12})`, borderColor: `rgba(139,92,246,${opacity * 0.3})`, color: `rgba(196,181,253,${opacity})`, fontSize: `${0.68 + (opacity - 0.45) * 0.3}rem` }}>
-                                                        {kw} <span className="opacity-50 text-[10px]">×{cnt}</span>
-                                                    </span>
-                                                );
-                                            })}
-                                        </div>
-                                    </Panel>
-                                )}
                             </div>
                         </>
                     )}

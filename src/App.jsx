@@ -8,24 +8,28 @@
 import './App.css'
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
-import UploadForm      from "./components/UploadForm";
-import HistoryPage     from "./pages/HistoryPage";
+import UploadForm from "./components/UploadForm";
+import HistoryPage from "./pages/HistoryPage";
 import CallDetailsPage from "./pages/CallDetailsPage";
-import DashboardPage   from "./pages/DashboardPage";
-import AnalyticsPage   from "./pages/AnalyticsPage";
-import LandingPage     from "./pages/LandingPage";
-import LoginPage       from "./pages/LoginPage";
-import SignupPage      from "./pages/SignupPage";
-import ProtectedRoute  from "./components/ProtectedRoute";
+import DashboardPage from "./pages/DashboardPage";
+import AnalyticsPage from "./pages/AnalyticsPage";
+import LandingPage from "./pages/LandingPage";
+import LoginPage from "./pages/LoginPage";
+import SignupPage from "./pages/SignupPage";
+import ProtectedRoute from "./components/ProtectedRoute";
+import LibraryPage from "./pages/LibraryPage.jsx";
+import AIInsightsPage from "./pages/AIInsightsPage.jsx";
+import ScorecardsPage from "./pages/ScorecardsPage.jsx";
+import SettingsPage from "./pages/SettingsPage.jsx";
 
 function App() {
     return (
         <BrowserRouter>
             <Routes>
                 {/* Public routes */}
-                <Route path="/"         element={<LandingPage />} />
-                <Route path="/login"    element={<LoginPage />} />
-                <Route path="/signup"   element={<SignupPage />} />
+                <Route path="/" element={<LandingPage />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/signup" element={<SignupPage />} />
                 <Route path="/register" element={<SignupPage />} />
 
                 {/* Protected routes — redirect to /login if no valid JWT */}
@@ -44,6 +48,10 @@ function App() {
                 <Route path="/upload" element={
                     <ProtectedRoute><UploadForm /></ProtectedRoute>
                 } />
+                <Route path="/library" element={<ProtectedRoute><LibraryPage /></ProtectedRoute>} />
+                <Route path="/insights" element={<ProtectedRoute><AIInsightsPage /></ProtectedRoute>} />
+                <Route path="/scorecards" element={<ProtectedRoute><ScorecardsPage /></ProtectedRoute>} />
+                <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
             </Routes>
         </BrowserRouter>
     );

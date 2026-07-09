@@ -3,7 +3,7 @@ import logo from "../assets/CONVEXA_AI_logo.png";
 import {
     LayoutDashboard, History, LineChart, BookOpen, Brain,
     ClipboardList, FileText, Key, Settings, Sparkles,
-    ArrowRight, ChevronsLeft, ChevronsRight, LogOut,
+    ArrowRight, ChevronsLeft, ChevronsRight, LogOut, Lock,
 } from "lucide-react";
 
 /* ────────────────────────────────────────────────────────────────────── */
@@ -42,23 +42,27 @@ export const THEMES = {
 
 /**
  * Sidebar — the app's primary left navigation.
- * Unchanged from its original DashboardPage.jsx implementation; only its
- * location moved so every page (Dashboard, Analytics, …) can render the
- * exact same nav instead of re-implementing it.
+ *
+ * Nav is now split by real product maturity, not by build order:
+ *   REAL_ITEMS  — fully shipped pages, live routes, real backend data.
+ *   SOON_ITEMS  — Reports & Keywords, which need backend work (scheduled
+ *                 export pipelines / keyword-spotting engine respectively)
+ *                 that hasn't been built yet. Shown as premium locked rows
+ *                 rather than dead links.
  */
 export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, currentPath, needsAttentionCount, totalCalls }) {
     const REAL_ITEMS = [
         { label: "Dashboard", path: "/dashboard", Icon: LayoutDashboard },
         { label: "Call History", path: "/history", Icon: History },
         { label: "Analytics", path: "/analytics", Icon: LineChart },
+        { label: "Library", path: "/library", Icon: BookOpen },
+        { label: "AI Insights", path: "/insights", Icon: Brain },
+        { label: "Scorecards", path: "/scorecards", Icon: ClipboardList },
+        { label: "Settings", path: "/settings", Icon: Settings },
     ];
     const SOON_ITEMS = [
-        { label: "Library", Icon: BookOpen },
-        { label: "AI Insights", Icon: Brain },
-        { label: "Scorecards", Icon: ClipboardList },
         { label: "Reports", Icon: FileText },
         { label: "Keywords", Icon: Key },
-        { label: "Settings", Icon: Settings },
     ];
 
     return (
@@ -109,11 +113,22 @@ export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, curren
                 )}
                 {SOON_ITEMS.map(({ label, Icon }) => (
                     <div key={label} title={collapsed ? `${label} — coming soon` : undefined}
-                        className={`flex items-center gap-3 rounded-xl text-sm font-medium cursor-not-allowed opacity-40 ${collapsed ? "justify-center px-0 py-3" : "px-3.5 py-2.5"}`}
-                        style={{ color: T.textMuted }}>
-                        <Icon size={17} strokeWidth={2} className="flex-shrink-0" />
-                        {!collapsed && <span className="truncate flex-1">{label}</span>}
-                        {!collapsed && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: T.panelHover }}>Soon</span>}
+                        className={`relative flex items-center gap-3 rounded-xl text-sm font-medium cursor-not-allowed transition-colors group ${collapsed ? "justify-center px-0 py-3" : "px-3.5 py-2.5"}`}
+                        style={{ color: T.textFaint }}>
+                        <div className="relative flex-shrink-0">
+                            <Icon size={17} strokeWidth={2} style={{ opacity: 0.45 }} />
+                            <div className="absolute -bottom-1 -right-1.5 w-3.5 h-3.5 rounded-full flex items-center justify-center"
+                                style={{ background: T.sidebarBg, border: `1px solid ${T.panelBorder}` }}>
+                                <Lock size={7} strokeWidth={2.5} style={{ color: T.textFaint }} />
+                            </div>
+                        </div>
+                        {!collapsed && <span className="truncate flex-1" style={{ opacity: 0.5 }}>{label}</span>}
+                        {!collapsed && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 tracking-wide"
+                                style={{ background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.22)", color: "#a78bfa" }}>
+                                SOON
+                            </span>
+                        )}
                     </div>
                 ))}
             </nav>
