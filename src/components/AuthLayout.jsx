@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { isAuthenticated } from "../services/api";
+import settingsService from "../services/settingsService.js";
 
 // ─────────────────────────────────────────
 //  GLOBAL STYLES  (same keyframes as LandingPage)
@@ -245,9 +246,14 @@ export default function AuthLayout({ children }) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Redirect already-authenticated users away from auth pages
+    // Redirect already-authenticated users away from auth pages — honoring
+    // their saved "Default Landing Page" preference instead of a hardcoded
+    // /dashboard. settingsService.load() is fetch-once/cached, so this is
+    // free if Dashboard or Settings already triggered it this session.
     if (isAuthenticated()) {
-      navigate("/dashboard", { replace: true });
+      settingsService.load().then(settings => {
+        navigate(settings?.defaultLandingPage || "/dashboard", { replace: true });
+      });
     }
   }, [navigate]);
 

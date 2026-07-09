@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import AuthLayout from "../components/AuthLayout";
 import GoogleAuthButton from "../components/GoogleAuthButton";
 import { authAPI, storeSession } from "../services/api";
+import settingsService from "../services/settingsService.js";
 import logo from "../assets/CONVEXA_AI_logo.png";
 
 // ─────────────────────────────────────────
@@ -299,7 +300,16 @@ function AuthInput({ label, type = "text", value, onChange, placeholder, error, 
 function LoginForm() {
   const navigate = useNavigate();
   const location = useLocation();
-  const from = location.state?.from?.pathname || "/dashboard";
+  // If ProtectedRoute bounced the user here trying to reach a specific page,
+  // that intent wins — resolveRedirectTarget() below only consults the saved
+  // "Default Landing Page" preference when there's no such explicit target.
+  const fromPath = location.state?.from?.pathname;
+
+  const resolveRedirectTarget = async () => {
+    if (fromPath) return fromPath;
+    const settings = await settingsService.load();
+    return settings?.defaultLandingPage || "/dashboard";
+  };
 
   const [form, setForm]       = useState({ email: "", password: "" });
   const [errors, setErrors]   = useState({});
@@ -333,7 +343,8 @@ function LoginForm() {
       const res = await authAPI.login({ email: form.email, password: form.password });
       storeSession(res.data);
       setSuccess(true);
-      setTimeout(() => navigate(from, { replace: true }), 800);
+      const target = await resolveRedirectTarget();
+      setTimeout(() => navigate(target, { replace: true }), 800);
     } catch (err) {
       const msg = err.response?.data?.message
         || err.response?.data?.error
@@ -378,9 +389,10 @@ function LoginForm() {
         label="Continue with Google"
         authAPI={authAPI}
         storeSession={storeSession}
-        onSuccess={() => {
+        onSuccess={async () => {
           setSuccess(true);
-          setTimeout(() => navigate(from, { replace: true }), 600);
+          const target = await resolveRedirectTarget();
+          setTimeout(() => navigate(target, { replace: true }), 600);
         }}
         onError={(msg) => setApiError(msg)}
       />
