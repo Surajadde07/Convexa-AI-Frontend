@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import api, { getUser, clearSession } from "../services/api.js";
+import settingsService from "../services/settingsService.js";
 import { logoutAndRedirect } from "../components/ProtectedRoute";
 import logo from "../assets/CONVEXA_AI_logo.png";
-import { Sidebar, THEMES } from "../components/Sidebar.jsx";
+import { Sidebar } from "../components/Sidebar.jsx";
+import { useTheme } from "../context/ThemeContext.jsx";
 import {
     Settings as SettingsIcon, User, Lock, Bell, Palette, SlidersHorizontal,
     ShieldCheck, AlertTriangle, Menu, Sun, Moon, Check, X, Eye, EyeOff,
@@ -12,15 +14,13 @@ import {
 
 /* ────────────────────────────────────────────────────────────────────── *
  * Settings.                                                              *
- * Real: profile identity (from getUser()), theme (same convexa_theme key *
- * every other page reads — changing it here changes it everywhere).      *
- * Local-only, flagged: notifications, default landing page, export       *
- * format, privacy toggle — persisted to localStorage under                *
- * convexa_settings_{userId} until dedicated endpoints exist.             *
- * Assumed endpoints (standard REST, not yet confirmed against your       *
- * backend — check before wiring): POST /api/auth/change-password,        *
- * DELETE /api/auth/account. Both fail gracefully with a clear toast if   *
- * the route doesn't exist yet.                                          *
+ * Theme:                    GET/PATCH /api/settings/me (via ThemeContext)*
+ * Notifications/prefs/priv: GET/PATCH /api/settings/me (via settingsService)*
+ * Profile:                  PATCH /api/users/me                          *
+ * Change password:          POST /api/account/change-password            *
+ * Delete account:           DELETE /api/account                         *
+ * Export data:               GET  /api/users/me/export                   *
+ * No localStorage is used for any of the above.                          *
  * ────────────────────────────────────────────────────────────────────── */
 
 const TABS = [
@@ -32,12 +32,6 @@ const TABS = [
     { id: "privacy", label: "Privacy", Icon: ShieldCheck },
     { id: "danger", label: "Danger Zone", Icon: AlertTriangle },
 ];
-
-function settingsKey(user) { return `convexa_settings_${user?.id ?? "anon"}`; }
-function loadSettings(user) {
-    try { return { notifCallReady: true, notifWeeklyDigest: true, notifNeedsAttention: true, defaultLanding: "/dashboard", exportFormat: "csv", shareAnonymizedData: false, ...JSON.parse(localStorage.getItem(settingsKey(user)) || "{}") }; }
-    catch { return { notifCallReady: true, notifWeeklyDigest: true, notifNeedsAttention: true, defaultLanding: "/dashboard", exportFormat: "csv", shareAnonymizedData: false }; }
-}
 
 function SectionLabel({ icon: Icon, children, tone = "#8b5cf6" }) {
     return (
@@ -73,17 +67,16 @@ function Toast({ message, type, onDismiss }) {
 
 export default function SettingsPage() {
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    const [themeMode, setThemeMode] = useState(() => localStorage.getItem("convexa_theme") || "dark");
+    const { themeMode, setThemeMode, T } = useTheme();
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [tab, setTab] = useState("profile");
     const [toast, setToast] = useState(null);
 
     const user = getUser();
-    const T = THEMES[themeMode];
     const location = useLocation();
     const navigate = useNavigate();
 
-    const [settings, setSettings] = useState(() => loadSettings(user));
+    const [settings, setSettings] = useState(() => settingsService.getCached());
     const [name, setName] = useState(user?.name ?? "");
     const [email, setEmail] = useState(user?.email ?? "");
 
@@ -95,21 +88,45 @@ export default function SettingsPage() {
 
     const [deleteConfirmText, setDeleteConfirmText] = useState("");
     const [deleting, setDeleting] = useState(false);
+    const [exporting, setExporting] = useState(false);
 
-    useEffect(() => { document.documentElement.style.colorScheme = themeMode; localStorage.setItem("convexa_theme", themeMode); }, [themeMode]);
-    useEffect(() => { localStorage.setItem(settingsKey(user), JSON.stringify(settings)); }, [settings]);
+    // "LOCAL" | "GOOGLE" | null (unknown until fetched). Drives which UI the
+    // Security tab shows — Google accounts have no local password to change.
+    const [accountProvider, setAccountProvider] = useState(null);
+
+    useEffect(() => {
+        const unsubscribe = settingsService.subscribe(setSettings);
+        settingsService.load();
+        return unsubscribe;
+    }, []);
+
+    useEffect(() => {
+        api.get("/api/users/me")
+            .then(res => setAccountProvider(res.data.provider || "LOCAL"))
+            .catch(() => setAccountProvider("LOCAL")); // fail open to the existing form rather than hide it on a network blip
+    }, []);
 
     const handleLogout = () => logoutAndRedirect();
-    const patchSetting = (key, value) => setSettings(prev => ({ ...prev, [key]: value }));
+    const patchSetting = (key, value) => {
+        settingsService.patch({ [key]: value }).catch(() => {
+            setToast({ message: "Couldn't save that change — please try again.", type: "error" });
+        });
+    };
 
     const handleSaveProfile = async () => {
         try {
-            // Assumed: PATCH /api/users/me — adjust to your real profile endpoint.
-            await api.patch("/api/users/me", { name, email });
+            const res = await api.patch("/api/users/me", { name, email });
+            // The backend reissues a token bound to the (possibly new) email.
+            // Without this, changing your email orphans the active token —
+            // every request after this one would start failing.
+            if (res.data.token) {
+                localStorage.setItem("convexa_token", res.data.token);
+            }
+            localStorage.setItem("convexa_user", JSON.stringify({ ...user, name: res.data.name, email: res.data.email }));
             setToast({ message: "Profile updated.", type: "success" });
         } catch (err) {
             console.error(err);
-            setToast({ message: "Couldn't save profile — endpoint may not exist yet.", type: "error" });
+            setToast({ message: err.response?.data?.message || "Couldn't save profile — please try again.", type: "error" });
         }
     };
 
@@ -119,7 +136,7 @@ export default function SettingsPage() {
         if (pwNew.length < 8) { setToast({ message: "New password must be at least 8 characters.", type: "error" }); return; }
         setPwSaving(true);
         try {
-            await api.post("/api/auth/change-password", { currentPassword: pwCurrent, newPassword: pwNew });
+            await api.post("/api/account/change-password", { currentPassword: pwCurrent, newPassword: pwNew });
             setToast({ message: "Password changed successfully.", type: "success" });
             setPwCurrent(""); setPwNew(""); setPwConfirm("");
         } catch (err) {
@@ -128,20 +145,30 @@ export default function SettingsPage() {
         } finally { setPwSaving(false); }
     };
 
-    const handleExportAllData = () => {
-        const blob = new Blob([JSON.stringify({ user, settings }, null, 2)], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = `convexa-account-export-${Date.now()}.json`; a.click();
-        URL.revokeObjectURL(url);
-        setToast({ message: "Account data exported.", type: "success" });
+    const handleExportAllData = async () => {
+        setExporting(true);
+        try {
+            const res = await api.get("/api/users/me/export");
+            const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = `convexa-account-export-${Date.now()}.json`; a.click();
+            URL.revokeObjectURL(url);
+            setToast({ message: "Account data exported.", type: "success" });
+        } catch (err) {
+            console.error(err);
+            setToast({ message: "Couldn't export account data — please try again.", type: "error" });
+        } finally {
+            setExporting(false);
+        }
     };
 
     const handleDeleteAccount = async () => {
         if (deleteConfirmText !== "DELETE") return;
         setDeleting(true);
         try {
-            await api.delete("/api/auth/account");
+            await api.delete("/api/account");
+            settingsService.reset();
             clearSession();
             navigate("/login");
         } catch (err) {
@@ -206,15 +233,28 @@ export default function SettingsPage() {
                             {tab === "security" && (
                                 <Panel T={T}>
                                     <SectionLabel icon={Lock} tone="#8b5cf6">Change Password</SectionLabel>
-                                    <div className="mt-5 space-y-4 max-w-md">
-                                        <Field T={T} label="Current password"><input type={showPw ? "text" : "password"} value={pwCurrent} onChange={e => setPwCurrent(e.target.value)} className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none" style={inputStyle(T)} /></Field>
-                                        <Field T={T} label="New password"><input type={showPw ? "text" : "password"} value={pwNew} onChange={e => setPwNew(e.target.value)} className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none" style={inputStyle(T)} /></Field>
-                                        <Field T={T} label="Confirm new password"><input type={showPw ? "text" : "password"} value={pwConfirm} onChange={e => setPwConfirm(e.target.value)} className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none" style={inputStyle(T)} /></Field>
-                                        <button onClick={() => setShowPw(s => !s)} className="flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: T.textFaint }}>{showPw ? <EyeOff size={12} /> : <Eye size={12} />} {showPw ? "Hide" : "Show"} passwords</button>
-                                        <button onClick={handleChangePassword} disabled={pwSaving} className="flex items-center gap-1.5 text-xs font-bold px-4 py-2.5 rounded-xl text-white disabled:opacity-60" style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>
-                                            <Lock size={13} /> {pwSaving ? "Updating…" : "Update Password"}
-                                        </button>
-                                    </div>
+                                    {accountProvider === "GOOGLE" ? (
+                                        <div className="mt-5 max-w-md">
+                                            <p className="text-sm" style={{ color: T.textMuted }}>
+                                                You're signed in with Google. Your password is managed by your Google Account.
+                                            </p>
+                                            <a href="https://myaccount.google.com/security" target="_blank" rel="noopener noreferrer"
+                                                className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold px-4 py-2.5 rounded-xl text-white"
+                                                style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>
+                                                <Lock size={13} /> Manage Google Account
+                                            </a>
+                                        </div>
+                                    ) : (
+                                        <div className="mt-5 space-y-4 max-w-md">
+                                            <Field T={T} label="Current password"><input type={showPw ? "text" : "password"} value={pwCurrent} onChange={e => setPwCurrent(e.target.value)} className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none" style={inputStyle(T)} /></Field>
+                                            <Field T={T} label="New password"><input type={showPw ? "text" : "password"} value={pwNew} onChange={e => setPwNew(e.target.value)} className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none" style={inputStyle(T)} /></Field>
+                                            <Field T={T} label="Confirm new password"><input type={showPw ? "text" : "password"} value={pwConfirm} onChange={e => setPwConfirm(e.target.value)} className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none" style={inputStyle(T)} /></Field>
+                                            <button onClick={() => setShowPw(s => !s)} className="flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: T.textFaint }}>{showPw ? <EyeOff size={12} /> : <Eye size={12} />} {showPw ? "Hide" : "Show"} passwords</button>
+                                            <button onClick={handleChangePassword} disabled={pwSaving} className="flex items-center gap-1.5 text-xs font-bold px-4 py-2.5 rounded-xl text-white disabled:opacity-60" style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>
+                                                <Lock size={13} /> {pwSaving ? "Updating…" : "Update Password"}
+                                            </button>
+                                        </div>
+                                    )}
                                 </Panel>
                             )}
 
@@ -230,7 +270,7 @@ export default function SettingsPage() {
                                         ].map(row => (
                                             <div key={row.key} className="flex items-center justify-between py-3.5" style={{ borderBottom: `1px solid ${T.divider}` }}>
                                                 <div><p className="text-xs font-semibold" style={{ color: T.text }}>{row.title}</p><p className="text-[11px] mt-0.5" style={{ color: T.textFaint }}>{row.sub}</p></div>
-                                                <Toggle T={T} checked={settings[row.key]} onChange={v => patchSetting(row.key, v)} />
+                                                <Toggle T={T} checked={!!settings?.[row.key]} onChange={v => patchSetting(row.key, v)} />
                                             </div>
                                         ))}
                                     </div>
@@ -267,9 +307,9 @@ export default function SettingsPage() {
                                         <p className="text-[11px] mt-1 mb-4" style={{ color: T.textFaint }}>Where you land right after signing in.</p>
                                         <div className="grid grid-cols-2 gap-3 max-w-md">
                                             {[{ id: "/dashboard", label: "Dashboard", Icon: LayoutDashboard }, { id: "/analytics", label: "Analytics", Icon: LineChart }].map(opt => (
-                                                <button key={opt.id} onClick={() => patchSetting("defaultLanding", opt.id)}
+                                                <button key={opt.id} onClick={() => patchSetting("defaultLandingPage", opt.id)}
                                                     className="flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-bold transition-all"
-                                                    style={settings.defaultLanding === opt.id ? { background: "rgba(139,92,246,0.14)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.35)" } : { background: T.panelHover, color: T.textMuted, border: `1px solid ${T.panelBorder}` }}>
+                                                    style={settings?.defaultLandingPage === opt.id ? { background: "rgba(139,92,246,0.14)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.35)" } : { background: T.panelHover, color: T.textMuted, border: `1px solid ${T.panelBorder}` }}>
                                                     <opt.Icon size={13} /> {opt.label}
                                                 </button>
                                             ))}
@@ -282,7 +322,7 @@ export default function SettingsPage() {
                                             {["csv", "json"].map(fmt => (
                                                 <button key={fmt} onClick={() => patchSetting("exportFormat", fmt)}
                                                     className="px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all"
-                                                    style={settings.exportFormat === fmt ? { background: "rgba(139,92,246,0.14)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.35)" } : { background: T.panelHover, color: T.textMuted, border: `1px solid ${T.panelBorder}` }}>
+                                                    style={settings?.exportFormat === fmt ? { background: "rgba(139,92,246,0.14)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.35)" } : { background: T.panelHover, color: T.textMuted, border: `1px solid ${T.panelBorder}` }}>
                                                     {fmt}
                                                 </button>
                                             ))}
@@ -297,7 +337,7 @@ export default function SettingsPage() {
                                     <SectionLabel icon={ShieldCheck} tone="#8b5cf6">Privacy</SectionLabel>
                                     <div className="mt-5 flex items-center justify-between py-3.5" style={{ borderBottom: `1px solid ${T.divider}` }}>
                                         <div><p className="text-xs font-semibold" style={{ color: T.text }}>Share anonymized data to improve AI models</p><p className="text-[11px] mt-0.5 max-w-md" style={{ color: T.textFaint }}>Your transcripts are never shared with your name or account attached. Off by default.</p></div>
-                                        <Toggle T={T} checked={settings.shareAnonymizedData} onChange={v => patchSetting("shareAnonymizedData", v)} />
+                                        <Toggle T={T} checked={!!settings?.shareAnonymizedData} onChange={v => patchSetting("shareAnonymizedData", v)} />
                                     </div>
                                     <button onClick={handleExportAllData} className="mt-4 flex items-center gap-1.5 text-xs font-bold px-4 py-2.5 rounded-xl" style={{ background: T.panelHover, color: T.text }}><Download size={13} /> Export My Account Data</button>
                                 </Panel>

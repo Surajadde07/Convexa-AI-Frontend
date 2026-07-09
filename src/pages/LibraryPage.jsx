@@ -3,7 +3,8 @@ import { Link, useLocation } from "react-router-dom";
 import api, { getUser } from "../services/api.js";
 import { logoutAndRedirect } from "../components/ProtectedRoute";
 import logo from "../assets/CONVEXA_AI_logo.png";
-import { Sidebar, THEMES } from "../components/Sidebar.jsx";
+import { Sidebar } from "../components/Sidebar.jsx";
+import { useTheme } from "../context/ThemeContext.jsx";
 import {
     Search, Star, Archive, ArchiveRestore, Tag, X, Check, Trash2,
     Download, FileText, Clock, Phone, ChevronDown, SlidersHorizontal,
@@ -90,11 +91,11 @@ export default function LibraryPage() {
     const [toast, setToast] = useState(null);
 
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    const [themeMode, setThemeMode] = useState(() => localStorage.getItem("convexa_theme") || "dark");
+    // theme now comes from the global ThemeProvider — no local state, no localStorage here
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     const user = getUser();
-    const T = THEMES[themeMode];
+    const { themeMode, toggleTheme, T } = useTheme();
     const location = useLocation();
 
     const [favorites, setFavorites] = useState(() => loadSet(user, "favorites"));
@@ -128,7 +129,6 @@ export default function LibraryPage() {
     }, []);
     useEffect(() => { fetchCalls(); }, [fetchCalls]);
 
-    useEffect(() => { document.documentElement.style.colorScheme = themeMode; localStorage.setItem("convexa_theme", themeMode); }, [themeMode]);
     useEffect(() => { saveSet(user, "favorites", favorites); }, [favorites]);
     useEffect(() => { saveSet(user, "archived", archived); }, [archived]);
     useEffect(() => { saveTags(user, tags); }, [tags]);
@@ -257,7 +257,7 @@ export default function LibraryPage() {
                             </div>
                         </div>
                         <div className="flex-1" />
-                        <button onClick={() => setThemeMode(m => m === "dark" ? "light" : "dark")}
+                        <button onClick={toggleTheme}
                             className="hidden sm:flex items-center justify-center w-9 h-9 rounded-xl flex-shrink-0" style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}>
                             {themeMode === "dark" ? <Sun size={14} style={{ color: T.textMuted }} /> : <Moon size={14} style={{ color: T.textMuted }} />}
                         </button>

@@ -4,7 +4,8 @@ import api, { getUser, clearSession } from "../services/api.js";
 import { logoutAndRedirect } from "../components/ProtectedRoute";
 import logo from "../assets/CONVEXA_AI_logo.png";
 import MiniAudioPlayer from "../components/MiniAudioPlayer.jsx";
-import { Sidebar, THEMES } from "../components/Sidebar.jsx";
+import { Sidebar } from "../components/Sidebar.jsx";
+import { useTheme } from "../context/ThemeContext.jsx";
 import {
     Search, SlidersHorizontal, ArrowUpDown, LayoutGrid, Rows3,
     Upload, X, ChevronDown, Smile, Frown, Meh, Star, Clock3,
@@ -580,10 +581,10 @@ export default function HistoryPage() {
     const [playingId, setPlayingId] = useState(null);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    const [themeMode, setThemeMode] = useState("dark");
+    // theme now comes from the global ThemeProvider — no local state, no localStorage here
     const [view, setView] = useState("grid"); // grid | list
     const [filterOpen, setFilterOpen] = useState(false);
-    const T = THEMES[themeMode];
+    const { themeMode, toggleTheme, T } = useTheme();
 
     // Filters — search / sentiment / date range / sort are unchanged from the
     // original page. filterRisk, filterScoreMin, filterOutcome, filterCallType
@@ -792,7 +793,7 @@ export default function HistoryPage() {
                                 <Upload size={14} /> Upload Call
                             </Link>
 
-                            <button onClick={() => setThemeMode(m => m === "dark" ? "light" : "dark")}
+                            <button onClick={toggleTheme}
                                 className="w-9 h-9 flex items-center justify-center rounded-xl transition-colors flex-shrink-0"
                                 style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.textMuted }} title="Toggle theme">
                                 {themeMode === "dark" ? <Sun size={15} /> : <Moon size={15} />}

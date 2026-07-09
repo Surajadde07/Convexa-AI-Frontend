@@ -3,7 +3,8 @@ import { Link, useLocation } from "react-router-dom";
 import api, { getUser } from "../services/api.js";
 import { logoutAndRedirect } from "../components/ProtectedRoute";
 import logo from "../assets/CONVEXA_AI_logo.png";
-import { Sidebar, THEMES } from "../components/Sidebar.jsx";
+import { Sidebar } from "../components/Sidebar.jsx";
+import { useTheme } from "../context/ThemeContext.jsx";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import {
     ClipboardList, Menu, Sun, Moon, ArrowUp, ArrowDown, Award, Target,
@@ -72,7 +73,7 @@ export default function ScorecardsPage() {
     const [dashboardLoading, setDashboardLoading] = useState(true);
 
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    const [themeMode, setThemeMode] = useState(() => localStorage.getItem("convexa_theme") || "dark");
+    // theme now comes from the global ThemeProvider — no local state, no localStorage here
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [range, setRange] = useState("30d");
 
@@ -80,7 +81,7 @@ export default function ScorecardsPage() {
     const [compareOpen, setCompareOpen] = useState(false);
 
     const user = getUser();
-    const T = THEMES[themeMode];
+    const { themeMode, toggleTheme, T } = useTheme();
     const location = useLocation();
 
     const fetchCalls = useCallback(async () => {
@@ -97,7 +98,7 @@ export default function ScorecardsPage() {
     }, []);
     useEffect(() => { fetchCalls(); }, [fetchCalls]);
     useEffect(() => { fetchDashboard(range); }, [range, fetchDashboard]);
-    useEffect(() => { document.documentElement.style.colorScheme = themeMode; localStorage.setItem("convexa_theme", themeMode); }, [themeMode]);
+    
 
     const handleLogout = () => logoutAndRedirect();
 
@@ -166,7 +167,7 @@ export default function ScorecardsPage() {
                                 <button key={r} onClick={() => setRange(r)} className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all" style={range === r ? { background: "rgba(139,92,246,0.2)", color: "#c4b5fd" } : { color: T.textFaint }}>{r === "7d" ? "7D" : r === "30d" ? "30D" : "All"}</button>
                             ))}
                         </div>
-                        <button onClick={() => setThemeMode(m => m === "dark" ? "light" : "dark")} className="hidden sm:flex items-center justify-center w-9 h-9 rounded-xl flex-shrink-0" style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}>{themeMode === "dark" ? <Sun size={14} style={{ color: T.textMuted }} /> : <Moon size={14} style={{ color: T.textMuted }} />}</button>
+                        <button onClick={toggleTheme} className="hidden sm:flex items-center justify-center w-9 h-9 rounded-xl flex-shrink-0" style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}>{themeMode === "dark" ? <Sun size={14} style={{ color: T.textMuted }} /> : <Moon size={14} style={{ color: T.textMuted }} />}</button>
                         <button onClick={() => setMobileMenuOpen(o => !o)} className="md:hidden flex items-center justify-center w-9 h-9 rounded-xl flex-shrink-0" style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}><Menu size={16} style={{ color: T.textMuted }} /></button>
                     </div>
                 </header>

@@ -8,7 +8,8 @@ import {
 import api, { getUser } from "../services/api.js";
 import { logoutAndRedirect } from "../components/ProtectedRoute";
 import logo from "../assets/CONVEXA_AI_logo.png";
-import { Sidebar, THEMES } from "../components/Sidebar.jsx";
+import { Sidebar } from "../components/Sidebar.jsx";
+import { useTheme } from "../context/ThemeContext.jsx";
 import {
     Phone, Star, Smile, Frown, TrendingUp, BarChart3,
     AlertTriangle, RefreshCw, KeyRound, Gauge, Target,
@@ -192,11 +193,11 @@ export default function AnalyticsPage() {
        None of this touches data fetching, routing, or business logic; it only
        changes how the already-fetched `calls` are displayed. ────────────── */
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    const [themeMode, setThemeMode] = useState("dark");
+    // theme now comes from the global ThemeProvider — no local state, no localStorage here
     const [searchQuery, setSearchQuery] = useState("");
     const [searchOpen, setSearchOpen] = useState(false);
     const [dateRange, setDateRange] = useState("30d"); // 7d | 30d | all — now also the range sent to the backend
-    const T = THEMES[themeMode];
+    const { themeMode, toggleTheme, T } = useTheme();
     const searchInputRef = useRef(null);
 
     /* ── Server-computed analytics (GET /api/analytics/employee): totals,
@@ -495,7 +496,7 @@ export default function AnalyticsPage() {
                         </div>
 
                         <div className="flex items-center gap-2 flex-shrink-0">
-                            <button onClick={() => setThemeMode(m => m === "dark" ? "light" : "dark")}
+                            <button onClick={toggleTheme}
                                 className="w-9 h-9 flex items-center justify-center rounded-xl transition-colors flex-shrink-0"
                                 style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.textMuted }}
                                 title="Toggle theme">

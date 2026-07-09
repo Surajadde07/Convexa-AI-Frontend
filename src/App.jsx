@@ -7,6 +7,7 @@
 
 import './App.css'
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { ThemeProvider } from "./context/ThemeContext.jsx";
 
 import UploadForm from "./components/UploadForm";
 import HistoryPage from "./pages/HistoryPage";
@@ -24,36 +25,38 @@ import SettingsPage from "./pages/SettingsPage.jsx";
 
 function App() {
     return (
-        <BrowserRouter>
-            <Routes>
-                {/* Public routes */}
-                <Route path="/" element={<LandingPage />} />
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/signup" element={<SignupPage />} />
-                <Route path="/register" element={<SignupPage />} />
+        <ThemeProvider>
+            <BrowserRouter>
+                <Routes>
+                    {/* Public routes */}
+                    <Route path="/" element={<LandingPage />} />
+                    <Route path="/login" element={<LoginPage />} />
+                    <Route path="/signup" element={<SignupPage />} />
+                    <Route path="/register" element={<SignupPage />} />
 
-                {/* Protected routes — redirect to /login if no valid JWT */}
-                <Route path="/dashboard" element={
-                    <ProtectedRoute><DashboardPage /></ProtectedRoute>
-                } />
-                <Route path="/history" element={
-                    <ProtectedRoute><HistoryPage /></ProtectedRoute>
-                } />
-                <Route path="/calls/:id" element={
-                    <ProtectedRoute><CallDetailsPage /></ProtectedRoute>
-                } />
-                <Route path="/analytics" element={
-                    <ProtectedRoute><AnalyticsPage /></ProtectedRoute>
-                } />
-                <Route path="/upload" element={
-                    <ProtectedRoute><UploadForm /></ProtectedRoute>
-                } />
-                <Route path="/library" element={<ProtectedRoute><LibraryPage /></ProtectedRoute>} />
-                <Route path="/insights" element={<ProtectedRoute><AIInsightsPage /></ProtectedRoute>} />
-                <Route path="/scorecards" element={<ProtectedRoute><ScorecardsPage /></ProtectedRoute>} />
-                <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-            </Routes>
-        </BrowserRouter>
+                    {/* Protected routes — redirect to /login if no valid JWT */}
+                    <Route path="/dashboard" element={
+                        <ProtectedRoute><DashboardPage /></ProtectedRoute>
+                    } />
+                    <Route path="/history" element={
+                        <ProtectedRoute><HistoryPage /></ProtectedRoute>
+                    } />
+                    <Route path="/calls/:id" element={
+                        <ProtectedRoute><CallDetailsPage /></ProtectedRoute>
+                    } />
+                    <Route path="/analytics" element={
+                        <ProtectedRoute><AnalyticsPage /></ProtectedRoute>
+                    } />
+                    <Route path="/upload" element={
+                        <ProtectedRoute><UploadForm /></ProtectedRoute>
+                    } />
+                    <Route path="/library" element={<ProtectedRoute><LibraryPage /></ProtectedRoute>} />
+                    <Route path="/insights" element={<ProtectedRoute><AIInsightsPage /></ProtectedRoute>} />
+                    <Route path="/scorecards" element={<ProtectedRoute><ScorecardsPage /></ProtectedRoute>} />
+                    <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+                </Routes>
+            </BrowserRouter>
+        </ThemeProvider>
     );
 }
 

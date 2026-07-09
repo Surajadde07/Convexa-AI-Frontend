@@ -3,7 +3,8 @@ import { Link, useLocation } from "react-router-dom";
 import api, { getUser } from "../services/api.js";
 import { logoutAndRedirect } from "../components/ProtectedRoute";
 import logo from "../assets/CONVEXA_AI_logo.png";
-import { Sidebar, THEMES } from "../components/Sidebar.jsx";
+import { Sidebar } from "../components/Sidebar.jsx";
+import { useTheme } from "../context/ThemeContext.jsx";
 import {
     Brain, TrendingUp, TrendingDown, Target, ShieldAlert, Gauge, Flame,
     Menu, Sun, Moon, ArrowRight, ArrowUp, ArrowDown, MessageSquareWarning,
@@ -88,7 +89,7 @@ function Skeleton({ className = "", T }) {
 
 export default function AIInsightsPage() {
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    const [themeMode, setThemeMode] = useState(() => localStorage.getItem("convexa_theme") || "dark");
+    // theme now comes from the global ThemeProvider — no local state, no localStorage here
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [range, setRange] = useState("30d");
 
@@ -100,7 +101,7 @@ export default function AIInsightsPage() {
     const [analyticsLoading, setAnalyticsLoading] = useState(true);
 
     const user = getUser();
-    const T = THEMES[themeMode];
+    const { themeMode, toggleTheme, T } = useTheme();
     const location = useLocation();
 
     const fetchDashboard = useCallback(async (r) => {
@@ -116,7 +117,7 @@ export default function AIInsightsPage() {
         finally { setAnalyticsLoading(false); }
     }, []);
     useEffect(() => { fetchDashboard(range); fetchAnalytics(range); }, [range, fetchDashboard, fetchAnalytics]);
-    useEffect(() => { document.documentElement.style.colorScheme = themeMode; localStorage.setItem("convexa_theme", themeMode); }, [themeMode]);
+    
 
     const handleLogout = () => logoutAndRedirect();
     const totalCalls = dashboardStats?.totalCalls ?? 0;
@@ -162,7 +163,7 @@ export default function AIInsightsPage() {
                                 </button>
                             ))}
                         </div>
-                        <button onClick={() => setThemeMode(m => m === "dark" ? "light" : "dark")} className="hidden sm:flex items-center justify-center w-9 h-9 rounded-xl flex-shrink-0" style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}>
+                        <button onClick={toggleTheme} className="hidden sm:flex items-center justify-center w-9 h-9 rounded-xl flex-shrink-0" style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}>
                             {themeMode === "dark" ? <Sun size={14} style={{ color: T.textMuted }} /> : <Moon size={14} style={{ color: T.textMuted }} />}
                         </button>
                         <button onClick={() => setMobileMenuOpen(o => !o)} className="md:hidden flex items-center justify-center w-9 h-9 rounded-xl flex-shrink-0" style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}><Menu size={16} style={{ color: T.textMuted }} /></button>

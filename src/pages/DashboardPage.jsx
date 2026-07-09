@@ -5,10 +5,12 @@ import {
     PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
 } from "recharts";
 import api, { getUser, clearSession } from "../services/api.js";
+import settingsService from "../services/settingsService.js";
 import { logoutAndRedirect } from "../components/ProtectedRoute";
 import logo from "../assets/CONVEXA_AI_logo.png";
 import MiniAudioPlayer from "../components/MiniAudioPlayer.jsx";
-import { Sidebar, THEMES } from "../components/Sidebar.jsx";
+import { Sidebar } from "../components/Sidebar.jsx";
+import { useTheme } from "../context/ThemeContext.jsx";
 import {
     Phone, Star, TrendingUp, TrendingDown, BarChart2,
     Upload, ChevronDown, X, CheckCircle, AlertTriangle,
@@ -884,7 +886,7 @@ export default function DashboardPage() {
        fetching, routing, or the state above — it only changes how the
        already-fetched `calls` are displayed. ─────────────────────────── */
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    const [themeMode, setThemeMode] = useState("dark");
+    // theme now comes from the global ThemeProvider — no local state, no localStorage here
     const [searchQuery, setSearchQuery] = useState("");
     const [searchOpen, setSearchOpen] = useState(false);
     const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
@@ -908,13 +910,24 @@ export default function DashboardPage() {
     const [notifOpen, setNotifOpen] = useState(false);
     const [readNotifIds, setReadNotifIds] = useState(() => new Set());
 
-    const T = THEMES[themeMode];
+    const { themeMode, toggleTheme, T } = useTheme();
     const location = useLocation();
     const navigate = useNavigate();
     const searchInputRef = useRef(null);
     const searchWrapRef = useRef(null);
     const filterWrapRef = useRef(null);
     const notifWrapRef = useRef(null);
+
+    // Notification preferences from Settings (Call analysis ready / Needs
+    // attention / Weekly digest). Read here so the bell only derives
+    // categories the user has actually enabled — see the `notifications`
+    // useMemo below.
+    const [notifPrefs, setNotifPrefs] = useState(() => settingsService.getCached());
+    useEffect(() => {
+        const unsubscribe = settingsService.subscribe(setNotifPrefs);
+        settingsService.load();
+        return unsubscribe;
+    }, []);
 
     const user = getUser();
     const firstName = user?.name?.split(" ")[0] ?? "there";
@@ -1152,36 +1165,46 @@ export default function DashboardPage() {
        fabricated; a call only produces a notification if the underlying
        field is actually present. `readNotifIds` is the only local state. */
     const notifications = useMemo(() => {
+        // Defaults match settingsService's DEFAULTS so nothing is hidden
+        // before the real preferences have loaded.
+        const notifCallReady = notifPrefs?.notifCallReady ?? true;
+        const notifNeedsAttention = notifPrefs?.notifNeedsAttention ?? true;
+        const notifWeeklyDigest = notifPrefs?.notifWeeklyDigest ?? true;
+
         const list = [];
-        calls.slice(0, 5).forEach(c => {
-            list.push({
-                id: `analyzed-${c.id}`, callId: c.id, time: c.createdAt,
-                Icon: Sparkles, color: "#8b5cf6",
-                title: "New call analyzed",
-                message: `${c.fileName || "A call"} finished processing.`,
+        if (notifCallReady) {
+            calls.slice(0, 5).forEach(c => {
+                list.push({
+                    id: `analyzed-${c.id}`, callId: c.id, time: c.createdAt,
+                    Icon: Sparkles, color: "#8b5cf6",
+                    title: "New call analyzed",
+                    message: `${c.fileName || "A call"} finished processing.`,
+                });
             });
-        });
-        calls.filter(c => c.overallScore != null && c.overallScore < 50).slice(0, 5).forEach(c => {
-            list.push({
-                id: `lowqa-${c.id}`, callId: c.id, time: c.createdAt,
-                Icon: AlertTriangle, color: "#ef4444",
-                title: "Low QA score detected",
-                message: `${c.fileName || "A call"} scored ${c.overallScore}/100 — may need coaching.`,
+        }
+        if (notifNeedsAttention) {
+            calls.filter(c => c.overallScore != null && c.overallScore < 50).slice(0, 5).forEach(c => {
+                list.push({
+                    id: `lowqa-${c.id}`, callId: c.id, time: c.createdAt,
+                    Icon: AlertTriangle, color: "#ef4444",
+                    title: "Low QA score detected",
+                    message: `${c.fileName || "A call"} scored ${c.overallScore}/100 — may need coaching.`,
+                });
             });
-        });
-        calls.filter(c => {
-            const items = parseList(c.actionItems);
-            return items.length > 0;
-        }).slice(0, 5).forEach(c => {
-            const count = parseList(c.actionItems).length;
-            list.push({
-                id: `action-${c.id}`, callId: c.id, time: c.createdAt,
-                Icon: CheckCircle, color: "#f59e0b",
-                title: "Action items pending",
-                message: `${c.fileName || "A call"} has ${count} open action item${count !== 1 ? "s" : ""}.`,
+            calls.filter(c => {
+                const items = parseList(c.actionItems);
+                return items.length > 0;
+            }).slice(0, 5).forEach(c => {
+                const count = parseList(c.actionItems).length;
+                list.push({
+                    id: `action-${c.id}`, callId: c.id, time: c.createdAt,
+                    Icon: CheckCircle, color: "#f59e0b",
+                    title: "Action items pending",
+                    message: `${c.fileName || "A call"} has ${count} open action item${count !== 1 ? "s" : ""}.`,
+                });
             });
-        });
-        if (calls.length > 0) {
+        }
+        if (notifWeeklyDigest && calls.length > 0) {
             const mostRecent = calls[0];
             list.push({
                 id: "weekly-report", callId: null, time: mostRecent.createdAt,
@@ -1193,7 +1216,7 @@ export default function DashboardPage() {
         return list
             .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0))
             .slice(0, 20);
-    }, [calls, totalCalls]);
+    }, [calls, totalCalls, notifPrefs]);
 
     const unreadNotifCount = notifications.filter(n => !readNotifIds.has(n.id)).length;
     const markNotifRead = (id) => setReadNotifIds(prev => new Set(prev).add(id));
@@ -1476,7 +1499,7 @@ export default function DashboardPage() {
                                 Upload
                             </button>
 
-                            <button onClick={() => setThemeMode(m => m === "dark" ? "light" : "dark")}
+                            <button onClick={toggleTheme}
                                 className="w-9 h-9 flex items-center justify-center rounded-xl transition-colors flex-shrink-0"
                                 style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.textMuted }}
                                 title="Toggle theme">
