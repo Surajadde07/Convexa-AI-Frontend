@@ -3,7 +3,7 @@ import logo from "../assets/CONVEXA_AI_logo.png";
 import {
     LayoutDashboard, History, LineChart, BookOpen, Brain,
     ClipboardList, FileText, Key, Settings, Sparkles,
-    ArrowRight, ChevronsLeft, ChevronsRight, LogOut, Lock,
+    ArrowRight, ChevronsLeft, ChevronsRight, LogOut, Lock, Building2,
 } from "lucide-react";
 
 /* ────────────────────────────────────────────────────────────────────── */
@@ -51,6 +51,11 @@ export const THEMES = {
  *                 rather than dead links.
  */
 export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, currentPath, needsAttentionCount, totalCalls }) {
+    // Sprint 1.5 RBAC: role comes from the same `user` object every page
+    // already passes in (populated at login via storeSession, which already
+    // flat-copies `role` off AuthResponse) — no new prop, no new fetch.
+    const isManagerOrAdmin = user?.role === "MANAGER" || user?.role === "ADMIN";
+
     const REAL_ITEMS = [
         { label: "Dashboard", path: "/dashboard", Icon: LayoutDashboard },
         { label: "Call History", path: "/history", Icon: History },
@@ -58,6 +63,10 @@ export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, curren
         { label: "Library", path: "/library", Icon: BookOpen },
         { label: "AI Insights", path: "/insights", Icon: Brain },
         { label: "Scorecards", path: "/scorecards", Icon: ClipboardList },
+        // Sprint 2 will add /company + CompanyDashboard.jsx. The nav item is
+        // wired now, gated to MANAGER/ADMIN, so Sprint 2 only needs to add
+        // the route — nothing here changes when it does.
+        ...(isManagerOrAdmin ? [{ label: "Company", path: "/company", Icon: Building2 }] : []),
         { label: "Settings", path: "/settings", Icon: Settings },
     ];
     const SOON_ITEMS = [

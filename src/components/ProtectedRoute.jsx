@@ -45,7 +45,7 @@
 
 import { useEffect } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { isAuthenticated, clearSession } from "../services/api";
+import { isAuthenticated, clearSession, getUser } from "../services/api";
 import { googleSignOut } from "../services/googleAuth";
 
 // ─── Exported logout helper — import this in every Sign Out button ────────────
@@ -72,7 +72,11 @@ export function logoutAndRedirect() {
 }
 
 // ─── Guard component ──────────────────────────────────────────────────────────
-export default function ProtectedRoute({ children }) {
+// `roles` is optional. Omit it for any page every authenticated user (any
+// role) can reach — that's every existing route today, unchanged. Pass it
+// only for future manager/admin-only pages, e.g.:
+//   <ProtectedRoute roles={["MANAGER", "ADMIN"]}><CompanyDashboard /></ProtectedRoute>
+export default function ProtectedRoute({ children, roles }) {
     const location = useLocation();
 
     // ── Layer 3: pageshow catches bfcache restores ────────────────────────────
@@ -104,6 +108,16 @@ export default function ProtectedRoute({ children }) {
     if (!isAuthenticated()) {
         // `replace` removes the protected URL from the history stack
         return <Navigate to="/" replace state={{ from: location }} />;
+    }
+
+    // Role gate — only applies when the route opts in via the `roles` prop.
+    // A USER manually typing a manager/admin URL lands back on /dashboard
+    // rather than seeing a blank page or a raw 403 from the API.
+    if (roles && roles.length > 0) {
+        const currentRole = getUser()?.role;
+        if (!roles.includes(currentRole)) {
+            return <Navigate to="/dashboard" replace />;
+        }
     }
 
     return children;

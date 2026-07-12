@@ -22,6 +22,7 @@ import LibraryPage from "./pages/LibraryPage.jsx";
 import AIInsightsPage from "./pages/AIInsightsPage.jsx";
 import ScorecardsPage from "./pages/ScorecardsPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
+import CompanyDashboard from "./pages/CompanyDashboard.jsx";
 
 function App() {
     return (
@@ -54,6 +55,7 @@ function App() {
                     <Route path="/insights" element={<ProtectedRoute><AIInsightsPage /></ProtectedRoute>} />
                     <Route path="/scorecards" element={<ProtectedRoute><ScorecardsPage /></ProtectedRoute>} />
                     <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+                    <Route path="/company" element={<ProtectedRoute roles={["MANAGER", "ADMIN"]}><CompanyDashboard /></ProtectedRoute>} />
                 </Routes>
             </BrowserRouter>
         </ThemeProvider>
