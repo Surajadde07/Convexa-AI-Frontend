@@ -861,3 +861,579 @@ export function generateCallReport(call) {
         .substring(0, 60);
     doc.save(`${safeName}_report.pdf`);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  EMPLOYEE PERFORMANCE REPORT  (Sprint 2.6)
+//
+//  Reuses every drawing primitive above (sectionHeader, filledRect, scoreBar,
+//  bullet, drawActionItems, drawRiskFlags, drawFollowUps, scoreColor, fmtDate,
+//  checkPage/newPage, the C palette) instead of building a second PDF toolkit.
+//  Only the page-assembly logic below is new — the same split as
+//  generateCallReport() above: reusable primitives vs. one-off layout calls.
+//
+//  `profile` is exactly what GET /api/company/employee/{id} already returns
+//  (EmployeeProfileResponse) — nothing here re-derives or re-fetches anything.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export function generateEmployeeReport(profile) {
+    if (!profile) return;
+
+    const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
+    init(doc);
+
+    const dashboard = profile.dashboard || {};
+    const analytics = profile.analytics || {};
+    const coaching = profile.coachingSummary || {};
+    const recentCalls = profile.recentCalls || [];
+
+    // ═════════════════════════════════════════
+    //  COVER BAND — same visual language as generateCallReport's cover
+    // ═════════════════════════════════════════
+    drawPageBg();
+
+    const BAND_H = 56;
+    const steps = 24;
+    for (let i = 0; i < steps; i++) {
+        const t = i / steps;
+        const r = Math.round(C.accentDark[0] + t * (C.bg[0] - C.accentDark[0]));
+        const g = Math.round(C.accentDark[1] + t * (C.bg[1] - C.accentDark[1]));
+        const b = Math.round(C.accentDark[2] + t * (C.bg[2] - C.accentDark[2]));
+        doc.setFillColor(r, g, b);
+        doc.rect(0, i * (BAND_H / steps), PW, BAND_H / steps + 0.5, "F");
+    }
+    filledRect(doc, 0, 0, 4, BAND_H, 0, C.accent);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(...C.white);
+    doc.text("CONVEXA", MARGIN + 4, 16);
+    doc.setTextColor(...C.accent);
+    doc.text(" AI", MARGIN + 4 + doc.getTextWidth("CONVEXA"), 16);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...C.muted);
+    doc.text("CONVERSATION INTELLIGENCE PLATFORM", MARGIN + 4, 22);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12.5);
+    doc.setTextColor(...C.white);
+    doc.text(wrapText(doc, profile.name || "Employee", PW * 0.5)[0], MARGIN + 4, 36);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.muted);
+    doc.text(`${profile.role || ""} · ${profile.email || ""}`, MARGIN + 4, 42);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...C.white);
+    doc.text("Employee Performance Report", PW - MARGIN, 16, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...C.muted);
+    doc.text("Confidential · For Internal Use", PW - MARGIN, 22, { align: "right" });
+
+    doc.setDrawColor(...C.accent);
+    doc.setLineWidth(0.4);
+    doc.line(MARGIN, BAND_H, PW - MARGIN, BAND_H);
+    setY(BAND_H + 8);
+
+    // ── EMPLOYEE INFORMATION ──────────────────────────────────────────────
+    sectionHeader("Employee Information", C.accent);
+    const infoRows = [
+        ["Name", profile.name || "—"],
+        ["Email", profile.email || "—"],
+        ["Role", profile.role || "—"],
+        ["Joined", fmtDate(profile.joinedDate)],
+        ["Performance Status", profile.statusBadge || "—"],
+        ["Health / Risk Level", `${profile.healthStatus || "Green"} / ${profile.riskLevel || "Low"}`],
+    ];
+    const INFO_H = infoRows.length * 8 + 6;
+    filledRect(doc, MARGIN, y(), CONTENT, INFO_H, 3, C.card);
+    doc.setFontSize(8.5);
+    infoRows.forEach(([label, value], i) => {
+        const ry = y() + 5 + i * 8;
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(...C.muted);
+        doc.text(label + ":", MARGIN + 6, ry);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(...C.white);
+        doc.text(wrapText(doc, value, CONTENT - 55)[0] || "—", MARGIN + 40, ry);
+    });
+    addY(INFO_H + 8);
+
+    // ── EXECUTIVE BRIEFING ────────────────────────────────────────────────
+    if (dashboard.briefing) {
+        sectionHeader("Executive Briefing", C.blue);
+        const briefingLines = wrapText(doc, clean(dashboard.briefing), CONTENT - 12);
+        const briefingH = briefingLines.length * 5.2 + 8;
+        checkPage(briefingH + 6);
+        filledRect(doc, MARGIN, y(), CONTENT, briefingH, 3, C.card);
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(9);
+        doc.setTextColor(...C.muted);
+        briefingLines.forEach((line, i) => doc.text(line, MARGIN + 6, y() + 6 + i * 5.2));
+        addY(briefingH + 8);
+    }
+
+    // ── KPI SUMMARY ───────────────────────────────────────────────────────
+    sectionHeader("KPI Summary", C.blue);
+    const kpis = [
+        ["Total Calls", dashboard.totalCalls ?? 0],
+        ["Average QA", dashboard.avgScore ?? 0],
+        ["Positive Sentiment %", `${dashboard.positivePercent ?? 0}%`],
+        ["CSAT Avg", `${dashboard.avgCustomerSatisfaction ?? 0}%`],
+    ];
+    const kpiW = CONTENT / 4 - 3;
+    checkPage(28);
+    kpis.forEach(([label, value], i) => {
+        const kx = MARGIN + i * (kpiW + 4);
+        filledRect(doc, kx, y(), kpiW, 24, 3, C.card);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(14);
+        doc.setTextColor(...C.white);
+        doc.text(String(value), kx + kpiW / 2, y() + 12, { align: "center" });
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(6.5);
+        doc.setTextColor(...C.muted);
+        doc.text(label, kx + kpiW / 2, y() + 19, { align: "center", maxWidth: kpiW - 4 });
+    });
+    addY(30);
+
+    // ── ACHIEVEMENTS & BADGES ───────────────────────────────────────────
+    const achievements = [];
+    if (dashboard.avgScore >= 85) achievements.push("Top Performer");
+    if (analytics.scoreTrendPercent > 4.0) achievements.push("Fast Improver");
+    if (dashboard.avgCustomerSatisfaction >= 80) achievements.push("Customer Favourite");
+    if (dashboard.avgScore >= 80) achievements.push("High QA");
+    if (dashboard.positivePercent >= 60) achievements.push("Positive Streak");
+    if (achievements.length) {
+        sectionHeader("Achievements & Badges", C.emerald);
+        let ax = MARGIN;
+        checkPage(12);
+        achievements.forEach(ach => {
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(8);
+            const w = doc.getTextWidth(ach) + 10;
+            if (ax + w > PW - MARGIN) { ax = MARGIN; addY(10); checkPage(12); }
+            filledRect(doc, ax, y(), w, 6, 3, [16, 40, 32]);
+            doc.setTextColor(...C.emerald);
+            doc.text(ach, ax + 5, y() + 4.2);
+            ax += w + 4;
+        });
+        addY(12);
+    }
+
+    // ── QA SCORE BREAKDOWN ───────────────────────────────────────────────
+    sectionHeader("QA Score Breakdown", C.emerald);
+    const qaRows = [
+        ["Communication", dashboard.avgCommunication],
+        ["Problem Resolution", dashboard.avgProblemResolution],
+        ["Professionalism", dashboard.avgProfessionalism],
+        ["Cust. Satisfaction", dashboard.avgCustomerSatisfaction],
+    ];
+    qaRows.forEach(([label, score]) => {
+        checkPage(10);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(...C.white);
+        doc.text(label, MARGIN, y() + 4);
+        doc.setFont("helvetica", "bold");
+        doc.text(String(score ?? 0), MARGIN + 50, y() + 4);
+        scoreBar(doc, MARGIN + 62, y() + 1, CONTENT - 62, 4, score ?? 0, scoreColor(score));
+        addY(9);
+    });
+    addY(4);
+
+    // ── PERSISTENT COACHING HISTORY ──────────────────────────────────────
+    if (profile.coachingSessions && profile.coachingSessions.length > 0) {
+        newPage();
+        sectionHeader("Coaching Sessions History", C.accent);
+        profile.coachingSessions.forEach(s => {
+            const lines = wrapText(doc, s.notes || "No focus notes recorded.", CONTENT - 70);
+            const rowH = Math.max(lines.length * 4.8 + 12, 22);
+            checkPage(rowH + 4);
+            filledRect(doc, MARGIN, y(), CONTENT, rowH, 3, C.card);
+            filledRect(doc, MARGIN, y(), 3, rowH, 1.5, C.accent);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9);
+            doc.setTextColor(...C.white);
+            doc.text(`${s.reason} (${s.sessionDate})`, MARGIN + 8, y() + 6);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(7.5);
+            doc.setTextColor(...C.muted);
+            doc.text(`Time: ${s.sessionTime} | Priority: ${s.priority} | Status: ${s.status}`, MARGIN + 8, y() + 11);
+            let ny = y() + 16;
+            doc.setFontSize(8.5);
+            doc.setTextColor(...C.white);
+            lines.forEach((line, idx) => {
+                doc.text(line, MARGIN + 8, ny + idx * 4.8);
+            });
+            addY(rowH + 4);
+        });
+        addY(4);
+    }
+
+    // ── LEARNING MODULES ASSIGNED ───────────────────────────────────────
+    if (profile.learningAssignments && profile.learningAssignments.length > 0) {
+        checkPage(24);
+        sectionHeader("Learning Module Assignments", C.blue);
+        profile.learningAssignments.forEach(a => {
+            checkPage(16);
+            filledRect(doc, MARGIN, y(), CONTENT, 12, 2, C.card);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9);
+            doc.setTextColor(...C.white);
+            doc.text(a.moduleName, MARGIN + 6, y() + 5);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(7.5);
+            doc.setTextColor(...C.muted);
+            doc.text(`Assigned: ${a.assignedDate} | Deadline: ${a.deadline}`, MARGIN + 6, y() + 9);
+            
+            const badgeLabel = a.status.toUpperCase();
+            const bColor = a.status === "Completed" ? C.emerald : C.amber;
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(7);
+            const tagW = doc.getTextWidth(badgeLabel) + 6;
+            filledRect(doc, MARGIN + CONTENT - tagW - 4, y() + 3.5, tagW, 5, 2, bColor);
+            doc.setTextColor(...C.bg);
+            doc.text(badgeLabel, MARGIN + CONTENT - tagW - 4 + tagW / 2, y() + 7, { align: "center" });
+
+            addY(15);
+        });
+        addY(4);
+    }
+
+    // ── PERSISTENT MANAGER NOTES ──────────────────────────────────────────
+    if (profile.managerNotes && profile.managerNotes.length > 0) {
+        newPage();
+        sectionHeader("Manager Coaching Notes", C.blue);
+        profile.managerNotes.forEach(n => {
+            const lines = wrapText(doc, n.text, CONTENT - 16);
+            const cardH = lines.length * 5 + 10;
+            checkPage(cardH + 4);
+            filledRect(doc, MARGIN, y(), CONTENT, cardH, 3, C.cardAlt);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(7.5);
+            doc.setTextColor(...C.dim);
+            doc.text(`LOGGED ON ${new Date(n.createdAt).toLocaleDateString()}`, MARGIN + 8, y() + 6);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(9);
+            doc.setTextColor(...C.white);
+            lines.forEach((line, idx) => {
+                doc.text(line, MARGIN + 8, y() + 11.5 + idx * 5);
+            });
+            addY(cardH + 4);
+        });
+        addY(4);
+    }
+
+    // ── PERFORMANCE IMPROVEMENT PLANS (PIP) ──────────────────────────────
+    if (profile.improvementPlans && profile.improvementPlans.length > 0) {
+        checkPage(24);
+        sectionHeader("Improvement Plans (PIP)", C.rose);
+        profile.improvementPlans.forEach(p => {
+            checkPage(20);
+            filledRect(doc, MARGIN, y(), CONTENT, 16, 2.5, C.card);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9);
+            doc.setTextColor(...C.white);
+            doc.text(`Target QA: ${p.targetQA}% | Target Sentiment: ${p.targetSentiment}`, MARGIN + 6, y() + 6);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(7.5);
+            doc.setTextColor(...C.muted);
+            doc.text(`Deadline: ${p.deadline} | Status: ${p.status} | Progress: ${p.progress}%`, MARGIN + 6, y() + 11);
+            addY(20);
+        });
+        addY(4);
+    }
+
+    // ── RECOMMENDATIONS ──────────────────────────────────────────────────
+    if (profile.overallRecommendation) {
+        checkPage(24);
+        sectionHeader("AI Recommendations", C.accent);
+        bullet(profile.overallRecommendation, 8, C.accent);
+    }
+
+    // ── RECENT CALLS ──────────────────────────────────────────────────────
+    if (recentCalls.length) {
+        newPage();
+        sectionHeader("Recent Call Analytics Logs", C.accent, `${recentCalls.length} most recent`);
+        recentCalls.forEach(c => {
+            const lines = wrapText(doc, c.fileName || "—", CONTENT - 60);
+            const rowH = Math.max(lines.length * 5, 8) + 3;
+            checkPage(rowH + 2);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(8.5);
+            doc.setTextColor(...C.white);
+            doc.text(lines[0] || "—", MARGIN, y() + 5);
+            doc.setTextColor(...C.muted);
+            doc.text(fmtDateShort(c.createdAt), MARGIN + 78, y() + 5);
+            doc.setTextColor(...(scoreColor(c.overallScore)));
+            doc.text(String(c.overallScore ?? "—"), MARGIN + 112, y() + 5);
+            doc.setTextColor(...C.muted);
+            doc.text(c.sentiment || "—", MARGIN + 128, y() + 5);
+            doc.text(c.outcomeStatus || "—", MARGIN + 156, y() + 5);
+            addY(rowH);
+        });
+        addY(4);
+    }
+
+    drawFooter();
+
+    const safeName = (profile.name || "employee-report")
+        .replace(/[^a-zA-Z0-9_\-]/g, "_")
+        .substring(0, 60);
+    doc.save(`${safeName}_performance_report.pdf`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  FORMAL PERFORMANCE REVIEW PDF GENERATOR
+// ═══════════════════════════════════════════════════════════════════════════
+export function generatePerformanceReview(profile) {
+    if (!profile) return;
+
+    const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
+    init(doc);
+
+    const dashboard = profile.dashboard || {};
+    const analytics = profile.analytics || {};
+    const coaching = profile.coachingSummary || {};
+
+    // ── White formal report background (differs from standard cover band)
+    doc.setFillColor(255, 255, 255);
+    doc.rect(0, 0, PW, PH, "F");
+
+    // Formal Header
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.setTextColor(30, 41, 59); // Slate 800
+    doc.text("CONVEXA AI · ENTERPRISE REVENUE INTELLIGENCE", MARGIN, 20);
+    doc.setDrawColor(148, 163, 184); // Slate 400
+    doc.setLineWidth(0.5);
+    doc.line(MARGIN, 23, PW - MARGIN, 23);
+
+    // Cover metadata
+    setY(30);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.setTextColor(71, 85, 105);
+    doc.text("EMPLOYEE PERFORMANCE EVALUATION", MARGIN, y());
+    addY(8);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.setTextColor(100, 116, 139);
+    
+    // Evaluation info
+    doc.text(`Employee Name:  ${profile.name}`, MARGIN, y());
+    doc.text(`Employee Email: ${profile.email}`, PW / 2 + 10, y());
+    addY(6);
+    doc.text(`Role:           ${profile.role || "USER"}`, MARGIN, y());
+    doc.text(`Evaluation Date: ${new Date().toLocaleDateString()}`, PW / 2 + 10, y());
+    addY(6);
+    doc.text(`Review Period:  Last 30 Days`, MARGIN, y());
+    doc.text(`Evaluated By:   System Manager Workspace`, PW / 2 + 10, y());
+    addY(10);
+
+    // Divider
+    doc.line(MARGIN, y(), PW - MARGIN, y());
+    addY(8);
+
+    // Section 1: Executive Summary
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(30, 41, 59);
+    doc.text("1. EXECUTIVE SUMMARY & BRIEFING", MARGIN, y());
+    addY(6);
+
+    const summaryText = dashboard.briefing || "The employee has demonstrated stable engagement with normal KPI benchmarks.";
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.setTextColor(71, 85, 105);
+    const summaryLines = doc.splitTextToSize(summaryText, CONTENT);
+    summaryLines.forEach(line => {
+        doc.text(line, MARGIN, y());
+        addY(5);
+    });
+    addY(4);
+
+    // Section 2: Ratings
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(30, 41, 59);
+    doc.text("2. PERFORMANCE SCORECARD RATING", MARGIN, y());
+    addY(6);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text(`Overall QA Score:  ${dashboard.avgScore} / 100`, MARGIN, y());
+    doc.setFont("helvetica", "normal");
+    doc.text(`Performance Status: ${profile.statusBadge || "Consistent Performer"}`, PW / 2 + 10, y());
+    addY(8);
+
+    // Metrics Table
+    const metrics = [
+        ["Communication Skills", `${dashboard.avgCommunication ?? 0}%`],
+        ["Problem Resolution Capability", `${dashboard.avgProblemResolution ?? 0}%`],
+        ["Professionalism & Compliance", `${dashboard.avgProfessionalism ?? 0}%`],
+        ["Customer Satisfaction Index", `${dashboard.avgCustomerSatisfaction ?? 0}%`],
+    ];
+    metrics.forEach(([lbl, val]) => {
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(71, 85, 105);
+        doc.text(lbl, MARGIN + 4, y());
+        doc.setTextColor(30, 41, 59);
+        doc.text(val, MARGIN + 100, y());
+        addY(6);
+    });
+    addY(4);
+
+    // Section 3: Strengths & Weaknesses
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(30, 41, 59);
+    doc.text("3. CORE STRENGTHS & OPPORTUNITIES FOR DEVELOPMENT", MARGIN, y());
+    addY(6);
+
+    // Strengths
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(16, 185, 129); // Emerald
+    doc.text("Primary Key Strengths:", MARGIN + 4, y());
+    addY(5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(71, 85, 105);
+    const strText = coaching.strengths || "Demonstrates strong overall execution on core parameters.";
+    const strLines = doc.splitTextToSize(strText, CONTENT - 8);
+    strLines.forEach(line => {
+        doc.text(line, MARGIN + 8, y());
+        addY(4.8);
+    });
+    addY(2);
+
+    // Weaknesses
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(239, 68, 68); // Red
+    doc.text("Focus Areas for Development:", MARGIN + 4, y());
+    addY(5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(71, 85, 105);
+    const weakText = coaching.weaknesses || "Identify and resolve objections with clearer structures.";
+    const weakLines = doc.splitTextToSize(weakText, CONTENT - 8);
+    weakLines.forEach(line => {
+        doc.text(line, MARGIN + 8, y());
+        addY(4.8);
+    });
+    addY(6);
+
+    // Page 2 - Reviews, Notes & Recommendations
+    doc.addPage();
+    doc.setFillColor(255, 255, 255);
+    doc.rect(0, 0, PW, PH, "F");
+    
+    // Page 2 header
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`Performance Review Evaluation · Employee: ${profile.name}`, MARGIN, 15);
+    doc.line(MARGIN, 18, PW - MARGIN, 18);
+    
+    setY(26);
+
+    // Section 4: Goals & PIP Status
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(30, 41, 59);
+    doc.text("4. PERFORMANCE IMPROVEMENT TARGETS (PIP)", MARGIN, y());
+    addY(6);
+
+    if (profile.improvementPlans && profile.improvementPlans.length > 0) {
+        const activePip = profile.improvementPlans[0];
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9.5);
+        doc.setTextColor(71, 85, 105);
+        doc.text(`Active PIP Plan Details:`, MARGIN + 4, y());
+        addY(5);
+        doc.setFont("helvetica", "normal");
+        doc.text(`Target QA: ${activePip.targetQA}% (Progress: ${activePip.progress}%)`, MARGIN + 8, y());
+        doc.text(`Deadline: ${activePip.deadline} (${activePip.status})`, PW / 2 + 10, y());
+        addY(6);
+        doc.text(`Assigned PIP Modules: ${activePip.assignedModules || "None"}`, MARGIN + 8, y());
+        addY(10);
+    } else {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9.5);
+        doc.text("No active formal Performance Improvement Plan (PIP) has been logged.", MARGIN + 4, y());
+        addY(10);
+    }
+
+    // Section 5: AI Manager Recommendations
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(30, 41, 59);
+    doc.text("5. SYSTEM COACHING RECOMMENDATIONS", MARGIN, y());
+    addY(6);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.setTextColor(71, 85, 105);
+    const recText = profile.overallRecommendation || "Maintain consistent metrics across communication and compliance.";
+    const recLines = doc.splitTextToSize(recText, CONTENT);
+    recLines.forEach(line => {
+        doc.text(line, MARGIN, y());
+        addY(5);
+    });
+    addY(10);
+
+    // Section 6: Notes
+    if (profile.managerNotes && profile.managerNotes.length > 0) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(30, 41, 59);
+        doc.text("6. MANAGER SESSION NOTES SUMMARY", MARGIN, y());
+        addY(6);
+
+        profile.managerNotes.slice(0, 3).forEach(n => {
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(8.5);
+            doc.setTextColor(100, 116, 139);
+            doc.text(`Note date: ${new Date(n.createdAt).toLocaleDateString()}`, MARGIN + 4, y());
+            addY(4.5);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(71, 85, 105);
+            const nLines = doc.splitTextToSize(n.text, CONTENT - 8);
+            nLines.forEach(line => {
+                doc.text(line, MARGIN + 8, y());
+                addY(4.5);
+            });
+            addY(2);
+        });
+        addY(8);
+    }
+
+    // Signatures
+    setY(PH - 40);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+    
+    doc.text("Evaluator / Manager Signature:", MARGIN, y());
+    doc.text("Employee Signature:", PW / 2 + 10, y());
+    addY(14);
+    doc.text("________________________________", MARGIN, y());
+    doc.text("________________________________", PW / 2 + 10, y());
+    addY(5);
+    doc.text("Date", MARGIN, y());
+    doc.text("Date", PW / 2 + 10, y());
+
+    // Footer page 2
+    doc.setFontSize(7.5);
+    doc.setTextColor(148, 163, 184);
+    doc.text("Convexa AI · Enterprise Performance Evaluation and Review Platform", PW / 2, PH - 6, { align: "center" });
+
+    const safeName = (profile.name || "employee-review")
+        .replace(/[^a-zA-Z0-9_\-]/g, "_")
+        .substring(0, 60);
+    doc.save(`${safeName}_performance_review.pdf`);
+}
+

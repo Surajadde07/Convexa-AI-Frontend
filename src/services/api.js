@@ -59,6 +59,10 @@ export const storeSession = (authResponse) => {
     name:  authResponse.name,
     email: authResponse.email,
     role:  authResponse.role,
+    companyName: authResponse.companyName,
+    companyLogo: authResponse.companyLogo,
+    department: authResponse.department,
+    managerName: authResponse.managerName,
   };
   localStorage.setItem("convexa_user", JSON.stringify(user));
 };

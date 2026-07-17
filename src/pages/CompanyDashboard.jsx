@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -9,100 +9,16 @@ import logo from "../assets/CONVEXA_AI_logo.png";
 import { Sidebar } from "../components/Sidebar.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
 import {
+    SectionLabel, Panel, Skeleton, TrendBadge, KPICard, tooltipStyleFor, ScoreBadge,
+    performerBadge, coachingBadge, PerformanceBadgePill,
+} from "../components/CompanyUI.jsx";
+import {
     Building2, Phone, Star, Smile, GraduationCap, TrendingUp,
-    ArrowUp, ArrowDown, AlertTriangle, RefreshCw, ChevronDown, Sun, Moon,
-    Menu, X, Trophy, Users,
+    AlertTriangle, RefreshCw, ChevronDown, Sun, Moon,
+    Menu, X, Trophy, Users, Search,
 } from "lucide-react";
 
-/* ────────────────────────────────────────────────────────────────────── *
- * Design-system primitives — identical shapes to Dashboard/Analytics's,  *
- * so this page reads as the same product, not a bolted-on new section.  *
- * ────────────────────────────────────────────────────────────────────── */
-
-function SectionLabel({ icon: Icon, children, tone = "#8b5cf6" }) {
-    return (
-        <div className="flex items-center gap-2">
-            {Icon && (
-                <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0"
-                    style={{ background: `${tone}1c`, border: `1px solid ${tone}35` }}>
-                    <Icon size={11} style={{ color: tone }} strokeWidth={2.5} />
-                </div>
-            )}
-            <span className="text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: tone }}>{children}</span>
-        </div>
-    );
-}
-
-function Panel({ children, className = "", style = {}, T }) {
-    return (
-        <div className={`rounded-2xl p-5 sm:p-6 ${className}`}
-            style={{ background: T.panel, border: `1px solid ${T.panelBorder}`, ...style }}>
-            {children}
-        </div>
-    );
-}
-
-function Skeleton({ className = "", T }) {
-    const base = T?.panelHover ?? "rgba(255,255,255,0.08)";
-    return (
-        <div className={`rounded-xl ${className}`}
-            style={{ background: `linear-gradient(90deg, transparent 25%, ${base} 50%, transparent 75%)`, backgroundSize: "200% 100%", animation: "shimmer 1.5s infinite" }} />
-    );
-}
-
-function TrendBadge({ pct }) {
-    if (pct == null || Number.isNaN(pct)) {
-        return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md" style={{ color: "#64748b", background: "rgba(148,163,184,0.1)" }}>–</span>;
-    }
-    const up = pct >= 0;
-    const color = up ? "#34d399" : "#f87171";
-    return (
-        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-md"
-            style={{ color, background: `${color}18` }}>
-            {up ? <ArrowUp size={9} /> : <ArrowDown size={9} />}
-            {Math.abs(pct).toFixed(1)}%
-        </span>
-    );
-}
-
-function KPICard({ label, value, sub, Icon, accent = "#8b5cf6", T }) {
-    return (
-        <div className="group relative overflow-hidden rounded-2xl border transition-all duration-300"
-            style={{ background: T.panel, borderColor: T.panelBorder }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = `${accent}55`; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 12px 32px ${accent}1c`; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = T.panelBorder; e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = ""; }}>
-            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
-                style={{ background: `radial-gradient(ellipse at 15% 0%, ${accent}14 0%, transparent 60%)` }} />
-            <div className="p-5">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 mb-3.5"
-                    style={{ background: `${accent}18`, border: `1px solid ${accent}30` }}>
-                    {Icon && <Icon size={18} style={{ color: accent }} strokeWidth={2} />}
-                </div>
-                <p className="text-3xl font-black mb-1 tracking-tight" style={{ color: T.text }}>{value}</p>
-                <p className="text-xs font-medium uppercase tracking-wider" style={{ color: T.textMuted }}>{label}</p>
-                {sub && <p className="text-[10px] mt-0.5" style={{ color: T.textFaint }}>{sub}</p>}
-            </div>
-        </div>
-    );
-}
-
-const tooltipStyleFor = (T) => ({
-    background: T.sidebarBg,
-    border: `1px solid ${T.panelBorder}`,
-    borderRadius: "12px",
-    color: T.text,
-    fontSize: "13px",
-});
-
-function ScoreBadge({ score }) {
-    const color = score >= 70 ? "#10b981" : score >= 50 ? "#f59e0b" : "#ef4444";
-    return (
-        <span className="inline-flex items-center justify-center min-w-[2.5rem] text-xs font-bold px-2 py-1 rounded-lg"
-            style={{ color, background: `${color}18` }}>
-            {Math.round(score)}
-        </span>
-    );
-}
+// Design-system primitives now imported from CompanyUI.jsx (see imports above)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PAGE
@@ -112,21 +28,25 @@ export default function CompanyDashboard() {
     const user = getUser();
     const location = useLocation();
     const { themeMode, toggleTheme, T } = useTheme();
+    const navigate = useNavigate();
 
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
-    const [volumeRange, setVolumeRange] = useState("7d"); // 7d | 30d — chart only
+    // Sprint 2.5 Feature 5: this one range now drives KPIs, the volume chart,
+    // Top Performers, AND Needs Coaching — it used to affect only the chart.
+    const [range, setRange] = useState("30d");
+    const [search, setSearch] = useState(""); // Feature 4 — frontend-only filter, no backend search
 
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    const fetchStats = useCallback(async (range) => {
+    const fetchStats = useCallback(async (r) => {
         setLoading(true);
         setError(null);
         try {
-            const res = await api.get(`/api/company/stats?range=${range}`);
+            const res = await api.get(`/api/company/stats?range=${r}`);
             setStats(res.data);
         } catch (err) {
             console.error("Failed to fetch company stats:", err);
@@ -136,12 +56,28 @@ export default function CompanyDashboard() {
         }
     }, []);
 
-    useEffect(() => { fetchStats(volumeRange); }, [fetchStats, volumeRange]);
+    useEffect(() => { fetchStats(range); }, [fetchStats, range]);
 
     const handleLogout = () => { logoutAndRedirect(); };
 
     const totalCalls = stats?.totalCalls ?? 0;
     const tooltipStyle = tooltipStyleFor(T);
+
+    // Feature 4 — pure client-side filter, no backend search. Applies to
+    // both tables from the same search box.
+    const filteredTopPerformers = useMemo(() => {
+        const list = stats?.topPerformers ?? [];
+        if (!search.trim()) return list;
+        const q = search.trim().toLowerCase();
+        return list.filter(p => p.employeeName?.toLowerCase().includes(q));
+    }, [stats, search]);
+
+    const filteredNeedsCoaching = useMemo(() => {
+        const list = stats?.needsCoaching ?? [];
+        if (!search.trim()) return list;
+        const q = search.trim().toLowerCase();
+        return list.filter(p => p.employeeName?.toLowerCase().includes(q));
+    }, [stats, search]);
 
     return (
         <div className="min-h-screen flex" style={{ background: T.pageBg, color: T.text, transition: "background 0.3s ease" }}>
@@ -261,13 +197,25 @@ export default function CompanyDashboard() {
                                 Company-wide performance across {totalCalls} analysed call{totalCalls !== 1 ? "s" : ""}
                             </p>
                         </div>
+
+                        {/* Feature 5 — one range control for KPIs, chart, Top Performers, and Needs Coaching */}
+                        <div className="relative flex-shrink-0">
+                            <select value={range} onChange={e => setRange(e.target.value)}
+                                className="appearance-none pl-3 pr-8 py-2 rounded-xl text-xs font-semibold cursor-pointer outline-none"
+                                style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }}>
+                                <option value="7d">Last 7 days</option>
+                                <option value="30d">Last 30 days</option>
+                                <option value="90d">Last 90 days</option>
+                            </select>
+                            <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: T.textFaint }} />
+                        </div>
                     </div>
 
                     {error && (
                         <div className="flex items-center gap-3 p-4 rounded-2xl" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)" }}>
                             <AlertTriangle size={16} className="text-red-400 flex-shrink-0" />
                             <span className="text-sm text-red-300">{error}</span>
-                            <button onClick={() => fetchStats(volumeRange)} className="ml-auto flex items-center gap-1.5 text-xs bg-red-500/20 hover:bg-red-500/30 px-3 py-1.5 rounded-lg font-semibold transition-colors text-red-200">
+                            <button onClick={() => fetchStats(range)} className="ml-auto flex items-center gap-1.5 text-xs bg-red-500/20 hover:bg-red-500/30 px-3 py-1.5 rounded-lg font-semibold transition-colors text-red-200">
                                 <RefreshCw className="w-3 h-3" /> Retry
                             </button>
                         </div>
@@ -293,25 +241,14 @@ export default function CompanyDashboard() {
                                         <KPICard label="Total Calls" value={stats.totalCalls} Icon={Phone} accent="#8b5cf6" T={T} />
                                         <KPICard label="Average Score" value={stats.avgScore} Icon={Star} accent="#f59e0b" T={T} />
                                         <KPICard label="Positive %" value={`${stats.positivePercent}%`} Icon={Smile} accent="#10b981" T={T} />
-                                        <KPICard label="Coaching Needed" value={stats.coachingNeededCount} sub="last 30 days" Icon={GraduationCap} accent="#ef4444" T={T} />
+                                        <KPICard label="Coaching Needed" value={stats.coachingNeededCount} sub={`in the selected range`} Icon={GraduationCap} accent="#ef4444" T={T} />
                                     </>
                                 )}
                             </div>
 
                             {/* ── CALL VOLUME ── */}
                             <Panel T={T}>
-                                <div className="flex items-center justify-between flex-wrap gap-3">
-                                    <SectionLabel icon={TrendingUp} tone="#a1a1aa">Call Volume</SectionLabel>
-                                    <div className="relative">
-                                        <select value={volumeRange} onChange={e => setVolumeRange(e.target.value)}
-                                            className="appearance-none pl-3 pr-8 py-1.5 rounded-lg text-xs font-semibold cursor-pointer outline-none"
-                                            style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }}>
-                                            <option value="7d">Last 7 days</option>
-                                            <option value="30d">Last 30 days</option>
-                                        </select>
-                                        <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: T.textFaint }} />
-                                    </div>
-                                </div>
+                                <SectionLabel icon={TrendingUp} tone="#a1a1aa">Call Volume</SectionLabel>
                                 {loading ? <Skeleton T={T} className="h-56 mt-4" /> : !stats.callVolume?.length ? (
                                     <div className="flex items-center justify-center h-48 text-sm flex-col gap-2 mt-4" style={{ color: T.textFaint }}>
                                         <TrendingUp className="w-8 h-8 opacity-50" />
@@ -320,7 +257,7 @@ export default function CompanyDashboard() {
                                 ) : (
                                     <div className="mt-4">
                                         <ResponsiveContainer width="100%" height={260}>
-                                            <BarChart data={stats.callVolume} barSize={volumeRange === "7d" ? 32 : 14}>
+                                            <BarChart data={stats.callVolume} barSize={range === "7d" ? 32 : range === "30d" ? 14 : 7}>
                                                 <CartesianGrid strokeDasharray="3 3" stroke={T.divider} vertical={false} />
                                                 <XAxis dataKey="date" tick={{ fill: T.textFaint, fontSize: 10 }} axisLine={false} tickLine={false} />
                                                 <YAxis allowDecimals={false} tick={{ fill: T.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
@@ -332,14 +269,22 @@ export default function CompanyDashboard() {
                                 )}
                             </Panel>
 
+                            {/* ── SEARCH (Feature 4) — filters both tables below, frontend-only ── */}
+                            <div className="relative max-w-sm">
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: T.textFaint }} />
+                                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search employee…"
+                                    className="w-full pl-9 pr-3 py-2.5 rounded-xl text-sm outline-none"
+                                    style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }} />
+                            </div>
+
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                 {/* ── TOP PERFORMERS ── */}
                                 <Panel T={T}>
-                                    <SectionLabel icon={Trophy} tone="#f59e0b">Top Performers · Last 30 Days</SectionLabel>
-                                    {loading ? <Skeleton T={T} className="h-56 mt-4" /> : !stats.topPerformers?.length ? (
+                                    <SectionLabel icon={Trophy} tone="#f59e0b">Top Performers</SectionLabel>
+                                    {loading ? <Skeleton T={T} className="h-56 mt-4" /> : !filteredTopPerformers.length ? (
                                         <div className="flex items-center justify-center h-40 text-sm flex-col gap-2 mt-4" style={{ color: T.textFaint }}>
                                             <Users className="w-8 h-8 opacity-50" />
-                                            <span>No employee data in the last 30 days</span>
+                                            <span>{search ? "No matching employees" : "No employee data in this range"}</span>
                                         </div>
                                     ) : (
                                         <div className="mt-4 overflow-x-auto">
@@ -353,9 +298,19 @@ export default function CompanyDashboard() {
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    {stats.topPerformers.map(p => (
-                                                        <tr key={p.employeeId} style={{ borderTop: `1px solid ${T.divider}` }}>
-                                                            <td className="py-2.5 font-semibold" style={{ color: T.text }}>{p.employeeName}</td>
+                                                    {filteredTopPerformers.map(p => (
+                                                        <tr key={p.employeeId}
+                                                            onClick={() => navigate(`/company/employee/${p.employeeId}`)}
+                                                            className="cursor-pointer transition-colors"
+                                                            style={{ borderTop: `1px solid ${T.divider}` }}
+                                                            onMouseEnter={e => { e.currentTarget.style.background = T.panelHover; }}
+                                                            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
+                                                            <td className="py-2.5 font-semibold" style={{ color: T.text }}>
+                                                                <div className="flex items-center gap-2">
+                                                                    {p.employeeName}
+                                                                    <PerformanceBadgePill badge={performerBadge(p.avgScore)} />
+                                                                </div>
+                                                            </td>
                                                             <td className="py-2.5 text-right" style={{ color: T.textMuted }}>{p.callCount}</td>
                                                             <td className="py-2.5 text-right"><ScoreBadge score={p.avgScore} /></td>
                                                             <td className="py-2.5 text-right"><TrendBadge pct={p.trendPercent} /></td>
@@ -369,11 +324,11 @@ export default function CompanyDashboard() {
 
                                 {/* ── NEEDS COACHING ── */}
                                 <Panel T={T}>
-                                    <SectionLabel icon={GraduationCap} tone="#ef4444">Needs Coaching · Last 30 Days</SectionLabel>
-                                    {loading ? <Skeleton T={T} className="h-56 mt-4" /> : !stats.needsCoaching?.length ? (
+                                    <SectionLabel icon={GraduationCap} tone="#ef4444">Needs Coaching</SectionLabel>
+                                    {loading ? <Skeleton T={T} className="h-56 mt-4" /> : !filteredNeedsCoaching.length ? (
                                         <div className="flex items-center justify-center h-40 text-sm flex-col gap-2 mt-4" style={{ color: T.textFaint }}>
                                             <Smile className="w-8 h-8 opacity-50" style={{ color: "#10b981" }} />
-                                            <span>Nobody is under the 65 threshold right now</span>
+                                            <span>{search ? "No matching employees" : "Nobody is under the 65 threshold right now"}</span>
                                         </div>
                                     ) : (
                                         <div className="mt-4 overflow-x-auto">
@@ -381,14 +336,26 @@ export default function CompanyDashboard() {
                                                 <thead>
                                                     <tr style={{ color: T.textFaint }} className="text-left text-[11px] uppercase tracking-wider">
                                                         <th className="pb-2 font-semibold">Employee</th>
+                                                        <th className="pb-2 font-semibold">Primary Weakness</th>
                                                         <th className="pb-2 font-semibold text-right">Calls</th>
                                                         <th className="pb-2 font-semibold text-right">Avg Score</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    {stats.needsCoaching.map(p => (
-                                                        <tr key={p.employeeId} style={{ borderTop: `1px solid ${T.divider}` }}>
-                                                            <td className="py-2.5 font-semibold" style={{ color: T.text }}>{p.employeeName}</td>
+                                                    {filteredNeedsCoaching.map(p => (
+                                                        <tr key={p.employeeId}
+                                                            onClick={() => navigate(`/company/employee/${p.employeeId}`)}
+                                                            className="cursor-pointer transition-colors"
+                                                            style={{ borderTop: `1px solid ${T.divider}` }}
+                                                            onMouseEnter={e => { e.currentTarget.style.background = T.panelHover; }}
+                                                            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
+                                                            <td className="py-2.5 font-semibold" style={{ color: T.text }}>
+                                                                <div className="flex items-center gap-2">
+                                                                    {p.employeeName}
+                                                                    <PerformanceBadgePill badge={coachingBadge(p.avgScore)} />
+                                                                </div>
+                                                            </td>
+                                                            <td className="py-2.5" style={{ color: T.textMuted }}>{p.primaryWeakness ?? "—"}</td>
                                                             <td className="py-2.5 text-right" style={{ color: T.textMuted }}>{p.callCount}</td>
                                                             <td className="py-2.5 text-right"><ScoreBadge score={p.avgScore} /></td>
                                                         </tr>

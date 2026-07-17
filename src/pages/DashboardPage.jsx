@@ -1694,6 +1694,26 @@ export default function DashboardPage() {
                         <LivePulse label="Live · updated just now" />
                     </div>
 
+                    {/* Workspace Details Banner (Issue 2) */}
+                    {user?.companyName && (
+                        <div className="p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+                             style={{ background: "rgba(139,92,246,0.06)", borderColor: "rgba(139,92,246,0.22)" }}>
+                            <div className="flex items-center gap-3.5">
+                                <img src={user.companyLogo || logo} alt="Company Logo" className="w-12 h-12 rounded-xl object-contain bg-white/5 p-1 border" style={{ borderColor: T.panelBorder }} />
+                                <div>
+                                    <h4 className="text-sm font-bold text-white">Active Workspace: {user.companyName}</h4>
+                                    <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>
+                                        Department: <span className="text-white font-semibold">{user.department || "General"}</span> · Role: <span className="text-violet-300 font-semibold">{user.role}</span>
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="text-left sm:text-right">
+                                <p className="text-xs font-semibold text-white">Manager: {user.managerName || "System Manager"}</p>
+                                <p className="text-[10px] mt-0.5" style={{ color: T.textFaint }}>Joined on: {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "Recently"}</p>
+                            </div>
+                        </div>
+                    )}
+
                     {/* ══════════════════════════════════════════════════
                         EMPTY STATE
                         ══════════════════════════════════════════════════ */}

@@ -4,6 +4,7 @@ import {
     LayoutDashboard, History, LineChart, BookOpen, Brain,
     ClipboardList, FileText, Key, Settings, Sparkles,
     ArrowRight, ChevronsLeft, ChevronsRight, LogOut, Lock, Building2,
+    SlidersHorizontal,
 } from "lucide-react";
 
 /* ────────────────────────────────────────────────────────────────────── */
@@ -63,10 +64,11 @@ export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, curren
         { label: "Library", path: "/library", Icon: BookOpen },
         { label: "AI Insights", path: "/insights", Icon: Brain },
         { label: "Scorecards", path: "/scorecards", Icon: ClipboardList },
-        // Sprint 2 will add /company + CompanyDashboard.jsx. The nav item is
-        // wired now, gated to MANAGER/ADMIN, so Sprint 2 only needs to add
-        // the route — nothing here changes when it does.
-        ...(isManagerOrAdmin ? [{ label: "Company", path: "/company", Icon: Building2 }] : []),
+        ...(isManagerOrAdmin ? [
+            { label: "Company", path: "/company", Icon: Building2 },
+            { label: "Company Settings", path: "/company/settings", Icon: SlidersHorizontal },
+            { label: "Invitations", path: "/company/invitations", Icon: ClipboardList }
+        ] : []),
         { label: "Settings", path: "/settings", Icon: Settings },
     ];
     const SOON_ITEMS = [
@@ -81,15 +83,19 @@ export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, curren
             <div className={`h-16 flex items-center flex-shrink-0 ${collapsed ? "justify-center px-0" : "justify-between px-5"}`}
                 style={{ borderBottom: `1px solid ${T.divider}` }}>
                 {!collapsed && (
-                    <div className="flex items-center gap-2.5 min-w-0">
-                        <img src={logo} alt="Convexa AI" className="h-6 w-auto flex-shrink-0" />
+                    <div className="flex items-center gap-2.5 min-w-0 w-full">
+                        <img src={user?.companyLogo || logo} alt="Workspace Logo" className="h-6 w-auto max-w-[32px] rounded object-contain flex-shrink-0" />
                         <div className="min-w-0">
-                            <p className="text-sm font-black tracking-tight truncate" style={{ color: T.text }}>Convexa AI</p>
-                            <p className="text-[10px] truncate" style={{ color: T.textFaint }}>Conversation Intelligence</p>
+                            <p className="text-sm font-black tracking-tight truncate" style={{ color: T.text }}>
+                                {user?.companyName || "Convexa AI"}
+                            </p>
+                            <p className="text-[10px] truncate" style={{ color: T.textFaint }}>
+                                {user?.companyName ? `${user.department || "General"} Workspace` : "Conversation Intelligence"}
+                            </p>
                         </div>
                     </div>
                 )}
-                {collapsed && <img src={logo} alt="Convexa AI" className="h-6 w-auto" />}
+                {collapsed && <img src={user?.companyLogo || logo} alt="Workspace Logo" className="h-6 w-auto rounded object-contain" />}
             </div>
 
             <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">

@@ -23,6 +23,11 @@ import AIInsightsPage from "./pages/AIInsightsPage.jsx";
 import ScorecardsPage from "./pages/ScorecardsPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 import CompanyDashboard from "./pages/CompanyDashboard.jsx";
+import EmployeePerformancePage from "./pages/EmployeePerformancePage.jsx";
+import EmployeeComparePage from "./pages/EmployeeComparePage.jsx";
+import CompanySettings from "./pages/CompanySettings.jsx";
+import CompanyInvitations from "./pages/CompanyInvitations.jsx";
+import AcceptInvitation from "./pages/AcceptInvitation.jsx";
 
 function App() {
     return (
@@ -34,6 +39,7 @@ function App() {
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/signup" element={<SignupPage />} />
                     <Route path="/register" element={<SignupPage />} />
+                    <Route path="/invite/:token" element={<AcceptInvitation />} />
 
                     {/* Protected routes — redirect to /login if no valid JWT */}
                     <Route path="/dashboard" element={
@@ -56,6 +62,10 @@ function App() {
                     <Route path="/scorecards" element={<ProtectedRoute><ScorecardsPage /></ProtectedRoute>} />
                     <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
                     <Route path="/company" element={<ProtectedRoute roles={["MANAGER", "ADMIN"]}><CompanyDashboard /></ProtectedRoute>} />
+                    <Route path="/company/settings" element={<ProtectedRoute roles={["MANAGER", "ADMIN"]}><CompanySettings /></ProtectedRoute>} />
+                    <Route path="/company/invitations" element={<ProtectedRoute roles={["MANAGER", "ADMIN"]}><CompanyInvitations /></ProtectedRoute>} />
+                    <Route path="/company/employee/:userId" element={<ProtectedRoute roles={["MANAGER", "ADMIN"]}><EmployeePerformancePage /></ProtectedRoute>} />
+                    <Route path="/company/compare/:userId" element={<ProtectedRoute roles={["MANAGER", "ADMIN"]}><EmployeeComparePage /></ProtectedRoute>} />
                 </Routes>
             </BrowserRouter>
         </ThemeProvider>

@@ -220,6 +220,30 @@ export default function SettingsPage() {
                                             <div className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-black text-white flex-shrink-0" style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>{name?.[0]?.toUpperCase() ?? "U"}</div>
                                             <div><p className="text-sm font-bold" style={{ color: T.text }}>{name || "User"}</p><p className="text-xs" style={{ color: T.textFaint }}>{email}</p></div>
                                         </div>
+
+                                        {user?.companyName && (
+                                            <div className="p-4 rounded-xl border space-y-2.5 max-w-md" style={{ background: "rgba(139,92,246,0.03)", borderColor: T.panelBorder }}>
+                                                <p className="text-[10px] font-bold text-violet-400 uppercase tracking-widest">Active Company Workspace</p>
+                                                <div className="flex items-center gap-3">
+                                                    <img src={user.companyLogo || logo} alt="Workspace Logo" className="w-10 h-10 rounded-lg object-contain bg-white/5 p-1 border" style={{ borderColor: T.panelBorder }} />
+                                                    <div>
+                                                        <p className="text-xs font-bold text-white">{user.companyName}</p>
+                                                        <p className="text-[10px]" style={{ color: T.textMuted }}>{user.department || "General"} Department</p>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2 text-[11px] pt-1.5" style={{ borderTop: `1px solid ${T.divider}` }}>
+                                                    <div>
+                                                        <span style={{ color: T.textFaint }}>Assigned Role: </span>
+                                                        <span className="font-semibold text-slate-300">{user.role}</span>
+                                                    </div>
+                                                    <div>
+                                                        <span style={{ color: T.textFaint }}>Manager: </span>
+                                                        <span className="font-semibold text-slate-300">{user.managerName || "System Manager"}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                             <Field T={T} label="Full name"><input value={name} onChange={e => setName(e.target.value)} className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none" style={inputStyle(T)} /></Field>
                                             <Field T={T} label="Email address"><input value={email} onChange={e => setEmail(e.target.value)} type="email" className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none" style={inputStyle(T)} /></Field>
