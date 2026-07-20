@@ -225,7 +225,14 @@ export default function SettingsPage() {
                                             <div className="p-4 rounded-xl border space-y-2.5 max-w-md" style={{ background: "rgba(139,92,246,0.03)", borderColor: T.panelBorder }}>
                                                 <p className="text-[10px] font-bold text-violet-400 uppercase tracking-widest">Active Company Workspace</p>
                                                 <div className="flex items-center gap-3">
-                                                    <img src={user.companyLogo || logo} alt="Workspace Logo" className="w-10 h-10 rounded-lg object-contain bg-white/5 p-1 border" style={{ borderColor: T.panelBorder }} />
+                                                    {(!user?.companyLogo || user.companyLogo.trim() === "" || user.companyLogo.includes("placeholder.com") || user.companyLogo.includes("via.placeholder.com")) ? (
+                                                        <div className="w-10 h-10 rounded-lg flex items-center justify-center font-black text-white flex-shrink-0"
+                                                            style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)", boxShadow: "0 2px 8px rgba(139,92,246,0.2)" }}>
+                                                            <span className="text-xs">{user?.companyName ? user.companyName[0].toUpperCase() : "C"}</span>
+                                                        </div>
+                                                    ) : (
+                                                        <img src={user.companyLogo} alt="Workspace Logo" className="w-10 h-10 rounded-lg object-contain bg-white/5 p-1 border" style={{ borderColor: T.panelBorder }} />
+                                                    )}
                                                     <div>
                                                         <p className="text-xs font-bold text-white">{user.companyName}</p>
                                                         <p className="text-[10px]" style={{ color: T.textMuted }}>{user.department || "General"} Department</p>

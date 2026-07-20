@@ -22,7 +22,10 @@ export default function AcceptInvitation() {
     
     const [submitting, setSubmitting] = useState(false);
     const [success, setSuccess] = useState(false);
-    const [error, setError] = useState("");
+    // inviteError: fatal errors (invalid/expired token) — replaces the form
+    const [inviteError, setInviteError] = useState("");
+    // formError: inline validation errors — shown inside the form, do NOT navigate away
+    const [formError, setFormError] = useState("");
 
     useEffect(() => {
         async function fetchInvite() {
@@ -34,7 +37,7 @@ export default function AcceptInvitation() {
                 }
             } catch (err) {
                 console.error("Failed to load invitation token", err);
-                setError(err.response?.data?.error || "This invitation link is invalid or has expired.");
+                setInviteError(err.response?.data?.error || "This invitation link is invalid or has expired.");
             } finally {
                 setLoading(false);
             }
@@ -44,16 +47,20 @@ export default function AcceptInvitation() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setError("");
+        setFormError("");
         setSuccess(false);
 
         if (!inviteData?.userExists) {
-            if (password !== confirmPassword) {
-                setError("Passwords do not match.");
+            if (!name.trim()) {
+                setFormError("Full name is required.");
                 return;
             }
             if (password.length < 6) {
-                setError("Password must be at least 6 characters.");
+                setFormError("Password must be at least 6 characters.");
+                return;
+            }
+            if (password !== confirmPassword) {
+                setFormError("Passwords do not match.");
                 return;
             }
         }
@@ -68,7 +75,8 @@ export default function AcceptInvitation() {
             setSuccess(true);
         } catch (err) {
             console.error("Failed to accept invitation", err);
-            setError(err.response?.data?.error || "Failed to complete onboarding.");
+            // Backend errors are shown inline inside the form (not as fatal screen replacement)
+            setFormError(err.response?.data?.error || "Failed to complete onboarding. Please try again.");
         } finally {
             setSubmitting(false);
         }
@@ -151,14 +159,14 @@ export default function AcceptInvitation() {
 
                 {/* Right Side: Accept Form & Credentials */}
                 <div className="p-8 sm:p-10 flex flex-col justify-center">
-                    {error ? (
+                    {inviteError ? (
                         <div className="text-center py-6 space-y-4">
                             <div className="mx-auto w-12 h-12 rounded-full bg-red-950/20 border border-red-500/30 flex items-center justify-center text-red-400">
                                 <AlertCircle size={22} />
                             </div>
                             <div>
                                 <h2 className="text-lg font-bold text-white">Invalid Invitation</h2>
-                                <p className="text-xs mt-1 px-4 leading-relaxed" style={{ color: T.textMuted }}>{error}</p>
+                                <p className="text-xs mt-1 px-4 leading-relaxed" style={{ color: T.textMuted }}>{inviteError}</p>
                             </div>
                             <button onClick={() => navigate("/login")} className="text-xs font-bold text-violet-400 hover:text-violet-300 underline">
                                 Go to Login
@@ -234,9 +242,17 @@ export default function AcceptInvitation() {
                                 </>
                             )}
 
+                            {formError && (
+                                <div className="flex items-start gap-2 p-3 rounded-xl"
+                                    style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)" }}>
+                                    <AlertCircle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
+                                    <p className="text-xs font-medium" style={{ color: "#f87171" }}>{formError}</p>
+                                </div>
+                            )}
+
                             <button type="submit" disabled={submitting}
-                                className="w-full flex items-center justify-center gap-1.5 text-xs font-bold py-2.5 rounded-xl transition-all cursor-pointer bg-violet-600 hover:bg-violet-500 text-white shadow-lg disabled:opacity-50">
-                                {inviteData?.userExists ? "Accept Invitation & Join Company" : "Accept Invitation & Create Account"} <ArrowRight size={13} />
+                                className="w-full flex items-center justify-center gap-1.5 text-xs font-bold py-2.5 rounded-xl transition-all cursor-pointer bg-violet-600 hover:bg-violet-500 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                                {submitting ? "Processing…" : (inviteData?.userExists ? "Accept Invitation & Join Company" : "Accept Invitation & Create Account")} <ArrowRight size={13} />
                             </button>
                         </form>
                     )}

@@ -81,8 +81,12 @@ export default function CompanyInvitations() {
     const [submitting, setSubmitting] = useState(false);
     const [success, setSuccess] = useState("");
     const [error, setError] = useState("");
+    const [refreshing, setRefreshing] = useState(false);
+    // Track in-flight actions per invitation ID to prevent duplicate clicks
+    const [actionInProgress, setActionInProgress] = useState(new Set());
 
-    const fetchInvitations = async () => {
+    const fetchInvitations = async (isRefresh = false) => {
+        if (isRefresh) setRefreshing(true);
         try {
             const res = await api.get("/api/company/invitations");
             setInvitations(res.data);
@@ -90,6 +94,7 @@ export default function CompanyInvitations() {
             console.error("Failed to load invitations", err);
         } finally {
             setLoading(false);
+            setRefreshing(false);
         }
     };
 
@@ -99,6 +104,7 @@ export default function CompanyInvitations() {
 
     const handleSend = async (e) => {
         e.preventDefault();
+        if (submitting) return; // prevent double-submit
         setSubmitting(true);
         setError("");
         setSuccess("");
@@ -108,6 +114,8 @@ export default function CompanyInvitations() {
             setEmail("");
             setDepartment("");
             fetchInvitations();
+            // Auto-dismiss success after 5 seconds
+            setTimeout(() => setSuccess(""), 5000);
         } catch (err) {
             console.error("Failed to create invitation", err);
             setError(err.response?.data?.error || "Failed to create invitation. Make sure the email is not registered.");
@@ -129,33 +137,39 @@ export default function CompanyInvitations() {
     };
 
     const handleCancel = async (id) => {
+        if (actionInProgress.has(id)) return;
         if (!window.confirm("Are you sure you want to cancel this invitation?")) return;
         setError("");
         setSuccess("");
+        setActionInProgress(prev => new Set(prev).add(id));
         try {
             await api.delete(`/api/company/invitations/${id}`);
             setSuccess("Invitation cancelled successfully.");
             fetchInvitations();
+            setTimeout(() => setSuccess(""), 5000);
         } catch (err) {
             console.error("Failed to cancel invitation", err);
             setError("Failed to cancel invitation.");
+        } finally {
+            setActionInProgress(prev => { const s = new Set(prev); s.delete(id); return s; });
         }
     };
 
     const handleResend = async (item) => {
+        if (actionInProgress.has(item.id)) return;
         setError("");
         setSuccess("");
+        setActionInProgress(prev => new Set(prev).add(item.id));
         try {
-            await api.post("/api/company/invitations", {
-                email: item.email,
-                role: item.role,
-                department: item.department
-            });
+            await api.post(`/api/company/invitations/${item.id}/resend`);
             setSuccess(`Re-sent HTML invitation successfully to ${item.email}`);
             fetchInvitations();
+            setTimeout(() => setSuccess(""), 5000);
         } catch (err) {
             console.error("Failed to resend invitation", err);
-            setError("Failed to resend invitation.");
+            setError(err.response?.data?.error || "Failed to resend invitation.");
+        } finally {
+            setActionInProgress(prev => { const s = new Set(prev); s.delete(item.id); return s; });
         }
     };
 
@@ -244,9 +258,20 @@ export default function CompanyInvitations() {
                             <h1 className="text-xl font-black text-white">Employee Onboarding</h1>
                             <p className="text-xs mt-1" style={{ color: T.textMuted }}>Provision secure workspace invitations and manage organization memberships.</p>
                         </div>
-                        <button onClick={() => setShowBulkModal(true)} className="flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer bg-slate-800 hover:bg-slate-700 text-violet-400 border border-violet-500/30">
-                            <Plus size={13} /> Bulk Invite Employees
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => fetchInvitations(true)}
+                                disabled={refreshing}
+                                className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                                style={{ background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.25)", color: "#a78bfa" }}
+                                title="Refresh invitations">
+                                <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
+                                {refreshing ? "Refreshing…" : "Refresh"}
+                            </button>
+                            <button onClick={() => setShowBulkModal(true)} className="flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer bg-slate-800 hover:bg-slate-700 text-violet-400 border border-violet-500/30">
+                                <Plus size={13} /> Bulk Invite Employees
+                            </button>
+                        </div>
                     </div>
 
                     {/* Dashboard Statistics widgets */}
@@ -456,11 +481,13 @@ export default function CompanyInvitations() {
                                                                             <Copy size={12} />
                                                                         </button>
                                                                         <button onClick={() => handleResend(item)} title="Resend HTML invitation link"
-                                                                            className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer">
-                                                                            <RefreshCw size={12} />
+                                                                            disabled={actionInProgress.has(item.id)}
+                                                                            className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                                                                            <RefreshCw size={12} className={actionInProgress.has(item.id) ? "animate-spin" : ""} />
                                                                         </button>
                                                                         <button onClick={() => handleCancel(item.id)} title="Cancel invitation"
-                                                                            className="p-1 rounded bg-red-950/20 hover:bg-red-950/40 text-red-400 transition-colors cursor-pointer">
+                                                                            disabled={actionInProgress.has(item.id)}
+                                                                            className="p-1 rounded bg-red-950/20 hover:bg-red-950/40 text-red-400 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
                                                                             <Trash2 size={12} />
                                                                         </button>
                                                                     </>

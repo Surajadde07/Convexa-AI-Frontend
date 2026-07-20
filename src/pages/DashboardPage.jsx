@@ -1699,7 +1699,14 @@ export default function DashboardPage() {
                         <div className="p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
                              style={{ background: "rgba(139,92,246,0.06)", borderColor: "rgba(139,92,246,0.22)" }}>
                             <div className="flex items-center gap-3.5">
-                                <img src={user.companyLogo || logo} alt="Company Logo" className="w-12 h-12 rounded-xl object-contain bg-white/5 p-1 border" style={{ borderColor: T.panelBorder }} />
+                                {(!user?.companyLogo || user.companyLogo.trim() === "" || user.companyLogo.includes("placeholder.com") || user.companyLogo.includes("via.placeholder.com")) ? (
+                                    <div className="w-12 h-12 rounded-xl flex items-center justify-center font-black text-white flex-shrink-0"
+                                        style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)", boxShadow: "0 2px 8px rgba(139,92,246,0.2)" }}>
+                                        <span className="text-lg">{user?.companyName ? user.companyName[0].toUpperCase() : "C"}</span>
+                                    </div>
+                                ) : (
+                                    <img src={user.companyLogo} alt="Company Logo" className="w-12 h-12 rounded-xl object-contain bg-white/5 p-1 border" style={{ borderColor: T.panelBorder }} />
+                                )}
                                 <div>
                                     <h4 className="text-sm font-bold text-white">Active Workspace: {user.companyName}</h4>
                                     <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>

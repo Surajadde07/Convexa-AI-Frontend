@@ -1,10 +1,11 @@
 import { Link } from "react-router-dom";
+import { useRef, useLayoutEffect } from "react";
 import logo from "../assets/CONVEXA_AI_logo.png";
 import {
     LayoutDashboard, History, LineChart, BookOpen, Brain,
     ClipboardList, FileText, Key, Settings, Sparkles,
     ArrowRight, ChevronsLeft, ChevronsRight, LogOut, Lock, Building2,
-    SlidersHorizontal,
+    SlidersHorizontal, Users,
 } from "lucide-react";
 
 /* ────────────────────────────────────────────────────────────────────── */
@@ -52,10 +53,58 @@ export const THEMES = {
  *                 rather than dead links.
  */
 export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, currentPath, needsAttentionCount, totalCalls }) {
-    // Sprint 1.5 RBAC: role comes from the same `user` object every page
-    // already passes in (populated at login via storeSession, which already
-    // flat-copies `role` off AuthResponse) — no new prop, no new fetch.
-    const isManagerOrAdmin = user?.role === "MANAGER" || user?.role === "ADMIN";
+    const isManagerOrAdmin = user?.role === "OWNER" || user?.role === "MANAGER" || user?.role === "ADMIN";
+    const navRef = useRef(null);
+
+    // Issue 8 fix — real root cause:
+    // Each page renders its own <Sidebar> instance, so React unmounts and remounts the
+    // component on every navigation. The DOM scrollTop resets to 0 on mount.
+    // Fix: persist the scroll position in sessionStorage (survives remount, cleared on tab close)
+    // and restore it synchronously via useLayoutEffect before the browser paints.
+    useLayoutEffect(() => {
+        const nav = navRef.current;
+        if (!nav) return;
+        const saved = parseInt(sessionStorage.getItem("sidebar_scroll") || "0", 10);
+        if (saved > 0) {
+            // Use requestAnimationFrame to restore after browser layout is complete
+            requestAnimationFrame(() => {
+                if (navRef.current) navRef.current.scrollTop = saved;
+            });
+        }
+        return () => {
+            // Persist scroll position on unmount so next Sidebar mount can restore it
+            if (navRef.current) {
+                sessionStorage.setItem("sidebar_scroll", String(navRef.current.scrollTop));
+            }
+        };
+    }, []);
+
+    // Trial calculations
+    const getTrialInfo = (trialEndsAt) => {
+        if (!trialEndsAt) return { daysLeft: 0, formattedDate: "" };
+        try {
+            const endDate = new Date(trialEndsAt);
+            const today = new Date();
+            const diffTime = endDate - today;
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            const formatted = endDate.toLocaleDateString("en-US", {
+                day: "numeric",
+                month: "short",
+                year: "numeric"
+            });
+            
+            return {
+                daysLeft: Math.max(0, diffDays),
+                formattedDate: formatted
+            };
+        } catch (e) {
+            return { daysLeft: 0, formattedDate: "" };
+        }
+    };
+    
+    const trialInfo = getTrialInfo(user?.trialEndsAt);
+    const isLogoInvalid = !user?.companyLogo || user.companyLogo.trim() === "" || user.companyLogo.includes("placeholder.com") || user.companyLogo.includes("via.placeholder.com");
 
     const REAL_ITEMS = [
         { label: "Dashboard", path: "/dashboard", Icon: LayoutDashboard },
@@ -66,6 +115,7 @@ export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, curren
         { label: "Scorecards", path: "/scorecards", Icon: ClipboardList },
         ...(isManagerOrAdmin ? [
             { label: "Company", path: "/company", Icon: Building2 },
+            { label: "Members", path: "/company/members", Icon: Users },
             { label: "Company Settings", path: "/company/settings", Icon: SlidersHorizontal },
             { label: "Invitations", path: "/company/invitations", Icon: ClipboardList }
         ] : []),
@@ -84,7 +134,14 @@ export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, curren
                 style={{ borderBottom: `1px solid ${T.divider}` }}>
                 {!collapsed && (
                     <div className="flex items-center gap-2.5 min-w-0 w-full">
-                        <img src={user?.companyLogo || logo} alt="Workspace Logo" className="h-6 w-auto max-w-[32px] rounded object-contain flex-shrink-0" />
+                        {isLogoInvalid ? (
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-white flex-shrink-0"
+                                style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)", boxShadow: "0 2px 8px rgba(139,92,246,0.2)" }}>
+                                <span className="text-xs">{user?.companyName ? user.companyName[0].toUpperCase() : "C"}</span>
+                            </div>
+                        ) : (
+                            <img src={user.companyLogo} alt="Workspace Logo" className="h-8 w-8 rounded-lg object-contain flex-shrink-0" />
+                        )}
                         <div className="min-w-0">
                             <p className="text-sm font-black tracking-tight truncate" style={{ color: T.text }}>
                                 {user?.companyName || "Convexa AI"}
@@ -95,10 +152,19 @@ export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, curren
                         </div>
                     </div>
                 )}
-                {collapsed && <img src={user?.companyLogo || logo} alt="Workspace Logo" className="h-6 w-auto rounded object-contain" />}
+                {collapsed && (
+                    isLogoInvalid ? (
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-white flex-shrink-0"
+                            style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)", boxShadow: "0 2px 8px rgba(139,92,246,0.2)" }}>
+                            <span className="text-xs">{user?.companyName ? user.companyName[0].toUpperCase() : "C"}</span>
+                        </div>
+                    ) : (
+                        <img src={user.companyLogo} alt="Workspace Logo" className="h-8 w-8 rounded-lg object-contain" />
+                    )
+                )}
             </div>
 
-            <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
+            <nav ref={navRef} className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
                 {REAL_ITEMS.map(({ label, path, Icon }) => {
                     const active = currentPath === path;
                     return (
@@ -159,7 +225,24 @@ export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, curren
                             style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>
                             Upgrade Now <ArrowRight size={11} />
                         </button>
-                        <p className="text-[9px] mt-2" style={{ color: T.textFaint }}>{totalCalls} call{totalCalls !== 1 ? "s" : ""} analysed on the Free plan</p>
+                        <div className="mt-3.5 space-y-1.5 pt-2" style={{ borderTop: `1px solid ${T.panelBorder}` }}>
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-bold text-violet-300">
+                                    {user?.subscriptionStatus === "TRIALING" ? "Business Trial" : `${user?.subscriptionPlan || "Free"} Plan`}
+                                </span>
+                                <span className="text-[9px] font-semibold text-slate-400">
+                                    {user?.currentSeatCount ?? 1} / {user?.seatLimit ?? 25} seats
+                                </span>
+                            </div>
+                            {user?.subscriptionStatus === "TRIALING" && trialInfo.formattedDate && (
+                                <p className="text-[9px] leading-tight" style={{ color: T.textMuted }}>
+                                    Trial until {trialInfo.formattedDate} ({trialInfo.daysLeft} days left)
+                                </p>
+                            )}
+                            <p className="text-[9px] leading-none" style={{ color: T.textFaint }}>
+                                {totalCalls} call{totalCalls !== 1 ? "s" : ""} analysed
+                            </p>
+                        </div>
                     </div>
                 ) : (
                     <button className="w-full flex items-center justify-center py-2.5 rounded-xl" title="Upgrade to Pro"
@@ -177,7 +260,7 @@ export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, curren
                         <>
                             <div className="flex-1 min-w-0">
                                 <p className="text-xs font-bold truncate" style={{ color: T.text }}>{user?.name ?? "User"}</p>
-                                <p className="text-[10px] truncate" style={{ color: T.textFaint }}>Admin</p>
+                                <p className="text-[10px] truncate" style={{ color: T.textFaint }}>{user?.role ? user.role.charAt(0) + user.role.slice(1).toLowerCase() : "User"}</p>
                             </div>
                             <button onClick={handleLogout} title="Sign out" className="p-1.5 rounded-lg transition-colors flex-shrink-0"
                                 style={{ color: T.textFaint }}

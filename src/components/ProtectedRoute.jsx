@@ -82,9 +82,12 @@ export default function ProtectedRoute({ children, roles }) {
     // ── Layer 3: pageshow catches bfcache restores ────────────────────────────
     useEffect(() => {
         const handlePageShow = (e) => {
-            // e.persisted === true means the page was restored from bfcache
             if (!isAuthenticated()) {
                 window.location.replace("/");
+                return;
+            }
+            if (getUser()?.noWorkspace) {
+                window.location.replace("/no-workspace");
             }
         };
 
@@ -92,6 +95,10 @@ export default function ProtectedRoute({ children, roles }) {
         const handlePopState = () => {
             if (!isAuthenticated()) {
                 window.location.replace("/");
+                return;
+            }
+            if (getUser()?.noWorkspace) {
+                window.location.replace("/no-workspace");
             }
         };
 
@@ -108,6 +115,14 @@ export default function ProtectedRoute({ children, roles }) {
     if (!isAuthenticated()) {
         // `replace` removes the protected URL from the history stack
         return <Navigate to="/" replace state={{ from: location }} />;
+    }
+
+    // ── Company-First (Model A): workspace access gate ────────────────────────
+    // If the user authenticated but has no workspace (removed from their company),
+    // block all protected pages and show the dedicated No Workspace page.
+    // This prevents workspace-less accounts from accessing dashboards or APIs.
+    if (getUser()?.noWorkspace) {
+        return <Navigate to="/no-workspace" replace />;
     }
 
     // Role gate — only applies when the route opts in via the `roles` prop.

@@ -230,7 +230,7 @@ function SignupForm() {
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
-    name: "", email: "", password: "", confirmPassword: "", terms: false,
+    name: "", email: "", password: "", confirmPassword: "", companyName: "", terms: false,
   });
   const [errors, setErrors]     = useState({});
   const [showPwd, setShowPwd]   = useState(false);
@@ -252,6 +252,9 @@ function SignupForm() {
       errs.name = "Full name is required";
     else if (form.name.trim().length < 2)
       errs.name = "Name must be at least 2 characters";
+
+    if (!form.companyName.trim())
+      errs.companyName = "Company name is required";
 
     if (!form.email.trim())
       errs.email = "Email is required";
@@ -286,6 +289,7 @@ function SignupForm() {
         name: form.name.trim(),
         email: form.email.trim().toLowerCase(),
         password: form.password,
+        companyName: form.companyName.trim(),
       });
       storeSession(res.data);
       setSuccess(true);
@@ -332,6 +336,15 @@ function SignupForm() {
         placeholder="Alex Johnson"
         error={errors.name}
         icon="👤"
+      />
+
+      <AuthInput
+        label="Company name"
+        value={form.companyName}
+        onChange={set("companyName")}
+        placeholder="Acme Corporation"
+        error={errors.companyName}
+        icon="🏢"
       />
 
       <AuthInput

@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import api, { getUser } from "../services/api.js";
 import { logoutAndRedirect } from "../components/ProtectedRoute";
 import { Sidebar } from "../components/Sidebar.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
 import {
-    Building2, SlidersHorizontal, Sun, Moon, Menu, X, Save, Check
+    Building2, SlidersHorizontal, Sun, Moon, Menu, X, Save, Check, Upload, Trash2, Image
 } from "lucide-react";
 
 function SectionLabel({ icon: Icon, children, tone = "#8b5cf6" }) {
@@ -50,7 +50,9 @@ function inputStyle(T) {
 
 export default function CompanySettings() {
     const { themeMode, toggleTheme, T } = useTheme();
-    const user = getUser();
+    
+    // Reactive userState so sidebar updates immediately
+    const [userState, setUserState] = useState(getUser());
     const handleLogout = () => logoutAndRedirect();
 
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -64,8 +66,14 @@ export default function CompanySettings() {
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [uploading, setUploading] = useState(false);
     const [success, setSuccess] = useState(false);
     const [error, setError] = useState("");
+
+    const fileInputRef = useRef(null);
+
+    // Permission Matrix: Only OWNER and ADMIN can edit. MANAGER and USER are read-only.
+    const hasEditPermission = userState?.role === "OWNER" || userState?.role === "ADMIN";
 
     useEffect(() => {
         async function fetchCompany() {
@@ -88,6 +96,7 @@ export default function CompanySettings() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (!hasEditPermission) return;
         setSaving(true);
         setError("");
         setSuccess(false);
@@ -99,11 +108,113 @@ export default function CompanySettings() {
                 companySize,
                 companyLogo
             });
+
+            // Update userState and localStorage so the changes propagate immediately
+            const raw = localStorage.getItem("convexa_user");
+            if (raw) {
+                const u = JSON.parse(raw);
+                u.companyName = companyName;
+                u.companyLogo = companyLogo ? companyLogo : null;
+                localStorage.setItem("convexa_user", JSON.stringify(u));
+                setUserState(u);
+            }
+
             setSuccess(true);
             setTimeout(() => setSuccess(false), 3000);
         } catch (err) {
             console.error("Failed to update company profile", err);
-            setError("Failed to update company profile.");
+            setError(err.response?.data?.error || "Failed to update company profile.");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleLogoUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // 1. Validate file type: PNG, JPG, JPEG, WEBP
+        const allowedTypes = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+        if (!allowedTypes.includes(file.type.toLowerCase())) {
+            setError("Invalid file type. Only PNG, JPG, JPEG, and WEBP are allowed.");
+            return;
+        }
+
+        // 2. Validate file size: Maximum 5 MB
+        if (file.size > 5 * 1024 * 1024) {
+            setError("File size exceeds the maximum limit of 5 MB.");
+            return;
+        }
+
+        setUploading(true);
+        setError("");
+        setSuccess(false);
+
+        try {
+            const formData = new FormData();
+            formData.append("logo", file);
+
+            const res = await api.post("/api/company/logo", formData, {
+                headers: {
+                    "Content-Type": "multipart/form-data"
+                }
+            });
+
+            const newLogoUrl = res.data.companyLogo;
+            setCompanyLogo(newLogoUrl || "");
+
+            // Sync userState and localStorage
+            const raw = localStorage.getItem("convexa_user");
+            if (raw) {
+                const u = JSON.parse(raw);
+                u.companyLogo = newLogoUrl;
+                localStorage.setItem("convexa_user", JSON.stringify(u));
+                setUserState(u);
+            }
+
+            setSuccess(true);
+            setTimeout(() => setSuccess(false), 3000);
+        } catch (err) {
+            console.error("Failed to upload logo", err);
+            setError(err.response?.data?.error || "Failed to upload logo.");
+        } finally {
+            setUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+    };
+
+    const handleRemoveLogo = async () => {
+        if (!window.confirm("Are you sure you want to remove the company logo?")) return;
+
+        setSaving(true);
+        setError("");
+        setSuccess(false);
+
+        try {
+            await api.patch("/api/company/profile", {
+                companyName,
+                industry,
+                website,
+                companySize,
+                companyLogo: "" // blank value clears it on backend
+            });
+
+            setCompanyLogo("");
+
+            // Sync userState and localStorage
+            const raw = localStorage.getItem("convexa_user");
+            if (raw) {
+                const u = JSON.parse(raw);
+                u.companyLogo = null;
+                localStorage.setItem("convexa_user", JSON.stringify(u));
+                setUserState(u);
+            }
+
+            setSuccess(true);
+            setTimeout(() => setSuccess(false), 3000);
+        } catch (err) {
+            console.error("Failed to remove logo", err);
+            setError(err.response?.data?.error || "Failed to remove company logo.");
         } finally {
             setSaving(false);
         }
@@ -111,7 +222,7 @@ export default function CompanySettings() {
 
     return (
         <div className="min-h-screen flex" style={{ background: T.pageBg, color: T.text, transition: "background 0.3s ease" }}>
-            <Sidebar collapsed={sidebarCollapsed} setCollapsed={setSidebarCollapsed} T={T} user={user}
+            <Sidebar collapsed={sidebarCollapsed} setCollapsed={setSidebarCollapsed} T={T} user={userState}
                 handleLogout={handleLogout} currentPath="/company/settings" needsAttentionCount={0} totalCalls={0} />
 
             <div className="flex-1 min-w-0 flex flex-col">
@@ -143,6 +254,14 @@ export default function CompanySettings() {
                             <p className="text-xs mt-1" style={{ color: T.textMuted }}>Manage your organization's metadata, logo, and website details.</p>
                         </div>
                     </div>
+
+                    {!hasEditPermission && (
+                        <div className="p-3.5 text-xs font-bold rounded-xl border flex items-center gap-2.5"
+                             style={{ background: "rgba(148,163,184,0.06)", borderColor: "rgba(148,163,184,0.12)", color: "#94a3b8" }}>
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse" />
+                            <span>You are viewing these settings in read-only mode. Only owners and administrators can edit company settings.</span>
+                        </div>
+                    )}
 
                     {error && (
                         <div className="p-3 text-xs font-bold rounded-xl border flex items-center gap-2"
@@ -176,13 +295,15 @@ export default function CompanySettings() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <Field label="Company Name" T={T}>
                                         <input type="text" required value={companyName} onChange={e => setCompanyName(e.target.value)}
-                                            placeholder="e.g. Convexa Corp" className="w-full px-3 py-2 rounded-xl text-xs font-semibold outline-none"
+                                            disabled={!hasEditPermission || saving || uploading}
+                                            placeholder="e.g. Convexa Corp" className="w-full px-3 py-2 rounded-xl text-xs font-semibold outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                                             style={inputStyle(T)} />
                                     </Field>
 
                                     <Field label="Industry" T={T}>
                                         <select value={industry} onChange={e => setIndustry(e.target.value)}
-                                            className="w-full px-3 py-2 rounded-xl text-xs font-semibold outline-none appearance-none"
+                                            disabled={!hasEditPermission || saving || uploading}
+                                            className="w-full px-3 py-2 rounded-xl text-xs font-semibold outline-none appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
                                             style={inputStyle(T)}>
                                             <option value="">Select Industry</option>
                                             <option value="Technology">Technology / SaaS</option>
@@ -198,13 +319,15 @@ export default function CompanySettings() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <Field label="Website URL" T={T}>
                                         <input type="url" value={website} onChange={e => setWebsite(e.target.value)}
-                                            placeholder="https://example.com" className="w-full px-3 py-2 rounded-xl text-xs font-semibold outline-none"
+                                            disabled={!hasEditPermission || saving || uploading}
+                                            placeholder="https://example.com" className="w-full px-3 py-2 rounded-xl text-xs font-semibold outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                                             style={inputStyle(T)} />
                                     </Field>
 
                                     <Field label="Company Size" T={T}>
                                         <select value={companySize} onChange={e => setCompanySize(e.target.value)}
-                                            className="w-full px-3 py-2 rounded-xl text-xs font-semibold outline-none appearance-none"
+                                            disabled={!hasEditPermission || saving || uploading}
+                                            className="w-full px-3 py-2 rounded-xl text-xs font-semibold outline-none appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
                                             style={inputStyle(T)}>
                                             <option value="">Select Size</option>
                                             <option value="1-10">1-10 employees</option>
@@ -216,27 +339,68 @@ export default function CompanySettings() {
                                     </Field>
                                 </div>
 
-                                <Field label="Company Logo URL" T={T}>
-                                    <div className="flex gap-4 items-center">
-                                        <div className="w-12 h-12 rounded-xl border flex items-center justify-center text-slate-500 overflow-hidden flex-shrink-0"
+                                <Field label="Company Logo" T={T}>
+                                    <div className="flex gap-5 items-center flex-wrap sm:flex-nowrap mt-1.5">
+                                        {/* Logo display area with fallback */}
+                                        <div className="w-16 h-16 rounded-xl border flex items-center justify-center overflow-hidden flex-shrink-0 relative shadow-sm"
                                             style={{ background: T.inputBg, borderColor: T.panelBorder }}>
                                             {companyLogo ? (
-                                                <img src={companyLogo} alt="Logo" className="w-full h-full object-cover" />
+                                                <img src={companyLogo} alt="Logo" className="w-full h-full object-contain" />
                                             ) : (
-                                                <Building2 size={16} />
+                                                <div className="w-full h-full flex items-center justify-center font-black text-white text-xl select-none"
+                                                    style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)", boxShadow: "0 2px 8px rgba(139,92,246,0.15)" }}>
+                                                    {companyName ? companyName[0].toUpperCase() : "C"}
+                                                </div>
                                             )}
                                         </div>
-                                        <input type="text" value={companyLogo} onChange={e => setCompanyLogo(e.target.value)}
-                                            placeholder="https://example.com/logo.png" className="w-full px-3 py-2 rounded-xl text-xs font-semibold outline-none"
-                                            style={inputStyle(T)} />
+
+                                        {/* Upload & Remove Logo Controls */}
+                                        <div className="flex flex-col gap-1.5">
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="file"
+                                                    ref={fileInputRef}
+                                                    onChange={handleLogoUpload}
+                                                    accept="image/png, image/jpeg, image/jpg, image/webp"
+                                                    className="hidden"
+                                                    disabled={!hasEditPermission || uploading || saving}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    disabled={!hasEditPermission || uploading || saving}
+                                                    onClick={() => fileInputRef.current?.click()}
+                                                    className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 rounded-xl transition-all cursor-pointer bg-slate-800 hover:bg-slate-700 text-white disabled:opacity-40 disabled:cursor-not-allowed border border-slate-750"
+                                                >
+                                                    <Upload size={11} className={uploading ? "animate-bounce" : ""} />
+                                                    {uploading ? "Uploading..." : "Upload Logo"}
+                                                </button>
+
+                                                {companyLogo && (
+                                                    <button
+                                                        type="button"
+                                                        disabled={!hasEditPermission || uploading || saving}
+                                                        onClick={handleRemoveLogo}
+                                                        className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 rounded-xl transition-all cursor-pointer bg-red-950/20 hover:bg-red-950/40 text-red-400 disabled:opacity-40 disabled:cursor-not-allowed border border-red-900/20"
+                                                    >
+                                                        <Trash2 size={11} />
+                                                        Remove Logo
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <p className="text-[10px]" style={{ color: T.textFaint }}>
+                                                Accepted formats: PNG, JPG, JPEG, WEBP. Maximum size: 5 MB.
+                                            </p>
+                                        </div>
                                     </div>
                                 </Field>
 
-                                <div className="flex justify-end pt-4" style={{ borderTop: `1px solid ${T.divider}` }}>
-                                    <button type="submit" disabled={saving} className="flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer bg-violet-600 hover:bg-violet-500 text-white shadow-lg disabled:opacity-50">
-                                        <Save size={13} /> {saving ? "Saving Changes..." : "Save Settings"}
-                                    </button>
-                                </div>
+                                {hasEditPermission && (
+                                    <div className="flex justify-end pt-4" style={{ borderTop: `1px solid ${T.divider}` }}>
+                                        <button type="submit" disabled={saving || uploading} className="flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer bg-violet-600 hover:bg-violet-500 text-white shadow-lg disabled:opacity-50">
+                                            <Save size={13} /> {saving ? "Saving Changes..." : "Save Settings"}
+                                        </button>
+                                    </div>
+                                )}
                             </Panel>
                         </form>
                     )}

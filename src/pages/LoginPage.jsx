@@ -343,6 +343,14 @@ function LoginForm() {
       const res = await authAPI.login({ email: form.email, password: form.password });
       storeSession(res.data);
       setSuccess(true);
+
+      // Company-First (Model A): if the user has no workspace, redirect to the
+      // dedicated no-workspace page instead of the dashboard.
+      if (res.data.noWorkspace) {
+        setTimeout(() => navigate("/no-workspace", { replace: true }), 600);
+        return;
+      }
+
       const target = await resolveRedirectTarget();
       setTimeout(() => navigate(target, { replace: true }), 800);
     } catch (err) {

@@ -60,9 +60,22 @@ export const storeSession = (authResponse) => {
     email: authResponse.email,
     role:  authResponse.role,
     companyName: authResponse.companyName,
+    companySlug: authResponse.companySlug,
     companyLogo: authResponse.companyLogo,
     department: authResponse.department,
     managerName: authResponse.managerName,
+    subscriptionPlan: authResponse.subscriptionPlan,
+    subscriptionStatus: authResponse.subscriptionStatus,
+    seatLimit: authResponse.seatLimit,
+    currentSeatCount: authResponse.currentSeatCount,
+    trialEndsAt: authResponse.trialEndsAt,
+    onboardingCompleted: authResponse.onboardingCompleted,
+    profileCompletionPercentage: authResponse.profileCompletionPercentage,
+    brandPrimaryColor: authResponse.brandPrimaryColor,
+    brandSecondaryColor: authResponse.brandSecondaryColor,
+    // noWorkspace: true means the user authenticated but has no company.
+    // Frontend should redirect to /no-workspace instead of the dashboard.
+    noWorkspace: authResponse.noWorkspace ?? false,
   };
   localStorage.setItem("convexa_user", JSON.stringify(user));
 };
@@ -84,6 +97,29 @@ export const getUser = () => {
 };
 
 export const isAuthenticated = () => Boolean(getToken());
+
+/**
+ * Updates the cached user session's seat count fields by calling sync-seats.
+ * Call this after adding/removing members so the Sidebar refreshes without a
+ * full page reload. Only updates seatCount fields — does NOT replace the JWT.
+ */
+export const refreshSeatCount = async (apiInstance) => {
+  try {
+    const res = await apiInstance.post("/api/company/sync-seats");
+    const { currentSeatCount } = res.data;
+    const raw = localStorage.getItem("convexa_user");
+    if (raw) {
+      const user = JSON.parse(raw);
+      user.currentSeatCount = currentSeatCount;
+      localStorage.setItem("convexa_user", JSON.stringify(user));
+    }
+    return currentSeatCount;
+  } catch (e) {
+    // Non-fatal: sidebar will just show stale data until next login
+    console.warn("refreshSeatCount failed silently", e);
+    return null;
+  }
+};
 
 export const authAPI = {
   register:    (data) => api.post("/api/auth/register", data),
