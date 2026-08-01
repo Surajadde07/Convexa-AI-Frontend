@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import api from "../services/api.js";
+import api, { getUser } from "../services/api.js";
+import { useWorkspace } from "../context/WorkspaceContext.jsx";
 import logo from "../assets/CONVEXA_AI_logo.png";
 import AudioPlayer from "../components/AudioPlayer.jsx";
 import { parseInsights } from "../utils/insightsFormatter.js";
@@ -299,6 +300,7 @@ const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 export default function CallDetailsPage() {
     const { id }        = useParams();
     const navigate      = useNavigate();
+    const { currentWorkspace } = useWorkspace();
 
     const [call, setCall]               = useState(null);
     const [loading, setLoading]         = useState(true);
@@ -325,7 +327,9 @@ export default function CallDetailsPage() {
     const [copiedTranscript, setCopiedTranscript] = useState(false);
     const [shareToast, setShareToast] = useState(false);
 
-    useEffect(() => {
+    const fetchCallDetails = () => {
+        setLoading(true);
+        setError(null);
         api.get(`/api/calls/${id}`)
             .then(r => {
                 const data = r.data;
@@ -346,9 +350,20 @@ export default function CallDetailsPage() {
                     setTimeline(buildFallbackTimeline(data.transcript));
                 }
             })
-            .catch(() => setError("Could not load call details."))
+            .catch((err) => {
+                const msg = err.response?.data?.message || err.response?.data || "Could not load call details.";
+                setError(typeof msg === "string" ? msg : "Could not load call details.");
+            })
             .finally(() => setLoading(false));
-    }, [id]);
+    };
+
+    useEffect(() => {
+        // Do not fire until WorkspaceContext has resolved the active workspace.
+        // Without this guard, the effect runs with the previous workspace's
+        // X-Workspace-Id header still set in api.js, causing 403 Forbidden.
+        if (!currentWorkspace?.company?.id) return;
+        fetchCallDetails();
+    }, [id, currentWorkspace?.company?.id]);
 
     /**
      * Fallback timeline generator — unchanged from the original implementation.
@@ -485,22 +500,30 @@ export default function CallDetailsPage() {
                 <div className="text-center">
                     <AlertTriangle className="w-12 h-12 mb-4 mx-auto text-amber-400" />
                     <p className="text-slate-300 mb-4">{error || "Call not found"}</p>
-                    <button onClick={() => navigate(-1)}
-                        className="px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-all">
-                        Go back
-                    </button>
+                    <div className="flex items-center gap-3 justify-center">
+                        <button onClick={fetchCallDetails}
+                            className="px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-all cursor-pointer">
+                            Retry
+                        </button>
+                        <button onClick={() => navigate(-1)}
+                            className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold transition-all cursor-pointer">
+                            Go back
+                        </button>
+                    </div>
                 </div>
             </div>
         );
     }
 
-    const sentCfg    = SENT_CONFIG[call.sentiment] || SENT_CONFIG.NEUTRAL;
-    const SentIcon   = sentCfg.icon;
-    const strengths  = parseList(call.strengths);
-    const improvements = parseList(call.improvements);
-    const keywords   = parseList(call.keywords);
-    const insights   = parseInsights(call.insights);
-    const outcomeCfg = call.outcomeStatus ? (OUTCOME_CONFIG[call.outcomeStatus] || OUTCOME_FALLBACK) : null;
+    const sentimentKey = (call?.sentiment || "NEUTRAL").toUpperCase();
+    const sentCfg    = SENT_CONFIG[sentimentKey] || SENT_CONFIG.NEUTRAL;
+    const SentIcon   = sentCfg.icon || SENT_CONFIG.NEUTRAL.icon;
+    const strengths  = parseList(call?.strengths);
+    const improvements = parseList(call?.improvements);
+    const keywords   = parseList(call?.keywords);
+    const insights   = parseInsights(call?.insights, call);
+    const outcomeStatusVal = call?.outcomeStatus || call?.outcome;
+    const outcomeCfg = outcomeStatusVal ? (OUTCOME_CONFIG[outcomeStatusVal] || OUTCOME_FALLBACK) : OUTCOME_FALLBACK;
 
     const TABS = [
         { id: "overview",    label: "Overview",   icon: ClipboardList, tone: "#8b5cf6" },
@@ -520,7 +543,7 @@ export default function CallDetailsPage() {
             <header className="sticky top-0 z-40 border-b border-white/8 backdrop-blur-xl"
                 style={{ background: "rgba(5,6,10,0.82)" }}>
                 <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center gap-4">
-                    <Link to="/dashboard" className="flex items-center gap-2.5 flex-shrink-0 mr-2">
+                    <Link to={`/w/${getUser()?.companySlug || "default"}/dashboard`} className="flex items-center gap-2.5 flex-shrink-0 mr-2">
                         <img src={logo} alt="Convexa AI" className="h-7 w-auto" />
                         <span className="text-base font-black tracking-tight hidden sm:block">
                             <span className="bg-gradient-to-r from-violet-400 to-blue-400 bg-clip-text text-transparent">Convexa</span>
@@ -529,9 +552,9 @@ export default function CallDetailsPage() {
                     </Link>
 
                     <div className="hidden sm:flex items-center gap-2 text-sm text-slate-500 min-w-0 flex-1">
-                        <Link to="/dashboard" className="hover:text-violet-400 transition-colors">Dashboard</Link>
+                        <Link to={`/w/${getUser()?.companySlug || "default"}/dashboard`} className="hover:text-violet-400 transition-colors">Dashboard</Link>
                         <ChevronRight className="w-3.5 h-3.5 text-slate-700" />
-                        <Link to="/history" className="hover:text-violet-400 transition-colors">History</Link>
+                        <Link to={`/w/${getUser()?.companySlug || "default"}/history`} className="hover:text-violet-400 transition-colors">History</Link>
                         <ChevronRight className="w-3.5 h-3.5 text-slate-700" />
                         <span className="text-slate-300 truncate max-w-[120px] sm:max-w-[160px] md:max-w-xs">{call.fileName}</span>
                     </div>
@@ -716,17 +739,17 @@ export default function CallDetailsPage() {
                         )}
 
                         {/* ── DEAL INTELLIGENCE ── */}
-                        {(call.outcomeStatus || call.callType || call.buyingIntent || call.confidence != null) && (
+                        {(outcomeStatusVal || call.callType || call.buyingIntent || call.confidence != null) && (
                             <GlassCard className="p-5">
                                 <SectionLabel icon={FileBarChart} tone="#60a5fa">Deal Intelligence</SectionLabel>
                                 <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 flex-wrap mt-4">
-                                    {call.outcomeStatus && (
+                                    {outcomeStatusVal && (
                                         <div>
                                             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Outcome</p>
                                             <span className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border"
                                                 style={{ background: outcomeCfg.bg, color: outcomeCfg.color, borderColor: outcomeCfg.border }}>
                                                 <outcomeCfg.icon className="w-3.5 h-3.5" strokeWidth={2.5} />
-                                                {call.outcomeStatus}
+                                                {outcomeStatusVal}
                                             </span>
                                         </div>
                                     )}

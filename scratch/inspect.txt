@@ -1,0 +1,210 @@
+2181:                                     import("../utils/generateReport.js").then(({ generateCallReport }) => {
+2182:                                         generateCallReport(calls[0]);
+2183:                                     });
+2184:                                 } else {
+2185:                                     setToast({ message: "No call available to export", type: "error" });
+2186:                                 }
+2187:                             }}
+2188:                             onManageMembers={() => navigate(`/w/${companySlug}/company/members`)}
+2189:                             companySlug={companySlug}
+2190:                         />
+2191:                     ) : (
+2192:                         <>
+2193:                         <div className="space-y-5">
+2194: 
+2195:                             {/* AI Briefing — the hero. This is the one thing on
+2196:                                 Dashboard that does real "so what" synthesis, so
+2197:                                 it leads the page full-width instead of sharing
+2198:                                 a side column with 3 other panels. */}
+2199:                             <div className="relative overflow-hidden rounded-2xl p-6"
+2200:                                 style={{ background: "linear-gradient(160deg, rgba(124,58,237,0.18) 0%, rgba(37,99,235,0.1) 100%)", border: "1px solid rgba(139,92,246,0.28)" }}>
+2201:                                 <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full opacity-20 blur-3xl pointer-events-none" style={{ background: "radial-gradient(circle, #8b5cf6, transparent)" }} />
+2202:                                 <div className="relative grid grid-cols-1 lg:grid-cols-3 gap-6">
+2203:                                     <div className="lg:col-span-2">
+2204:                                         <div className="flex items-center justify-between mb-4">
+2205:                                             <div className="flex items-center gap-2">
+2206:                                                 <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "rgba(139,92,246,0.25)", border: "1px solid rgba(139,92,246,0.4)" }}>
+2207:                                                     <Sparkles size={13} className="text-violet-200" />
+2208:                                                 </div>
+2209:                                                 <span className="text-sm font-bold text-white">Today's AI Briefing</span>
+2210:                                             </div>
+2211:                                             <LivePulse label="Live" />
+2212:                                         </div>
+2213: 
+2214:                                         <p className="text-[0.95rem] leading-relaxed mb-4" style={{ color: "rgba(255,255,255,0.88)" }}>
+2215:                                             {(loading || dashboardLoading) ? "Pulling together your latest conversation data…" : briefing}
+2216:                                         </p>
+2217: 
+2218:                                         {!loading && !dashboardLoading && (
+2219:                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+2220:                                                 {recommendations.map((r, i) => (
+2221:                                                     <div key={i} className="flex items-start gap-2.5 p-2.5 rounded-xl" style={{ background: "rgba(0,0,0,0.18)" }}>
+2222:                                                         <r.Icon size={14} className="mt-0.5 flex-shrink-0" style={{ color: r.color }} />
+2223:                                                         <span className="text-xs leading-relaxed" style={{ color: "rgba(255,255,255,0.8)" }}>{r.text}</span>
+2224:                                                     </div>
+2225:                                                 ))}
+2226:                                             </div>
+2227:                                         )}
+2228:                                     </div>
+2229: 
+2230:                                     {/* Confidence + CTA — its own column now that there's room */}
+2231:                                     <div className="flex lg:flex-col items-center lg:items-stretch justify-between gap-4 lg:border-l lg:pl-6" style={{ borderColor: "rgba(255,255,255,0.12)" }}>
+2232:                                         <div className="text-center lg:text-left">
+2233:                                             <p className="text-[10px] font-medium uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.5)" }}>Confidence</p>
+2234:                                             <p className="text-3xl font-black text-white">{totalCalls > 0 ? "92%" : "–"}</p>
+2235:                                         </div>
+2236:                                         <Link to="/analytics" className="inline-flex items-center justify-center gap-1.5 text-xs font-bold text-white px-4 py-2.5 rounded-xl hover:gap-2 transition-all flex-shrink-0"
+2237:                                             style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)" }}>
+2238:                                             View Full Report <ArrowRight size={12} />
+2239:                                         </Link>
+2240:                                     </div>
+2241:                                 </div>
+2242:                             </div>
+2243: 
+2244:                             {/* Today's snapshot */}
+2245:                             <div>
+2246:                                 <div className="mb-2.5">
+2247:                                     <SectionLabel T={T} icon={Gauge} tone="#a1a1aa">Today's Snapshot</SectionLabel>
+2248:                                 </div>
+2249:                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+2250:                                     {(loading || dashboardLoading) ? (
+2251:                                         Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} T={T} className="h-24" />)
+2252:                                     ) : (
+2253:                                         <>
+2254:                                             <KPICard T={T} label="Total Calls" value={statsTotalCalls} Icon={Phone} accent="#8b5cf6"
+2255:                                                 series={callsSeries} trendPct={seriesTrend(callsSeries)} sub={`${dateRange === "all" ? "all time" : dateRange === "7d" ? "last 7 days" : "last 30 days"}`} compact />
+2256:                                             <KPICard T={T} label="Avg QA Score" value={avgScore} Icon={Star} accent="#3b82f6"
+2257:                                                 series={scoreSeries} trendPct={seriesTrend(scoreSeries)}
+2258:                                                 sub={Number(avgScore) >= 70 ? "Good" : Number(avgScore) >= 50 ? "Fair" : "Needs focus"} compact />
+2259:                                             <KPICard T={T} label="Positive Sentiment" value={`${positivePercent}%`} Icon={TrendingUp} accent="#10b981"
+2260:                                                 series={positiveSeries} trendPct={seriesTrend(positiveSeries)} sub={`${positiveCalls} of ${statsTotalCalls} calls`} compact />
+2261:                                             <KPICard T={T} label="Customer Satisfaction" value={dashboardStats?.avgCustomerSatisfaction || "–"} Icon={Award} accent="#f59e0b"
+2262:                                                 series={csatSeries} trendPct={seriesTrend(csatSeries)} sub="avg score /100" compact />
+2263:                                         </>
+2264:                                     )}
+2265:                                 </div>
+2266:                             </div>
+2267: 
+2268:                             {/* Call Outcomes & Deal Intelligence */}
+2269:                             <div>
+2270:                                 <div className="mb-2.5 flex items-center justify-between">
+2271:                                     <SectionLabel T={T} icon={Target} tone="#8b5cf6">Call Outcomes & Deal Intelligence</SectionLabel>
+2272:                                     {filters.outcomeStatus !== "all" && (
+2273:                                         <button onClick={() => setFilters(f => ({ ...f, outcomeStatus: "all" }))}
+2274:                                             className="text-[11px] text-violet-400 hover:text-violet-300 font-bold transition-colors">
+2275:                                             Clear Outcome Filter
+2276:                                         </button>
+2277:                                     )}
+2278:                                 </div>
+2279:                                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+2280:                                     {[
+2281:                                         { key: "Won", label: "Won / Closed", color: "#10b981", bg: "rgba(16,185,129,0.1)", border: "rgba(16,185,129,0.3)", icon: Trophy },
+2282:                                         { key: "Follow Up Required", label: "Follow Up Required", color: "#f59e0b", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)", icon: RotateCcw },
+2283:                                         { key: "Escalated", label: "Escalated", color: "#f97316", bg: "rgba(249,115,22,0.1)", border: "rgba(249,115,22,0.3)", icon: AlertTriangle },
+2284:                                         { key: "Pending", label: "Pending", color: "#eab308", bg: "rgba(234,179,8,0.1)", border: "rgba(234,179,8,0.3)", icon: Hourglass },
+2285:                                         { key: "Lost", label: "Lost", color: "#ef4444", bg: "rgba(239,68,68,0.1)", border: "rgba(239,68,68,0.3)", icon: XCircle },
+2286:                                     ].map(item => {
+2287:                                         const count = (dashboardStats?.outcomeDistribution?.[item.key] ?? 
+2288:                                                        rangedCalls.filter(c => (c.outcomeStatus || c.outcome) === item.key).length) || 0;
+2289:                                         const pctVal = statsTotalCalls > 0 ? Math.round((count / statsTotalCalls) * 100) : 0;
+2290:                                         const isSelected = filters.outcomeStatus === item.key;
+2291:                                         return (
+2292:                                             <div key={item.key}
+2293:                                                 onClick={() => setFilters(f => ({ ...f, outcomeStatus: isSelected ? "all" : item.key }))}
+2294:                                                 className="p-3.5 rounded-xl border transition-all cursor-pointer group"
+2295:                                                 style={{
+2296:                                                     background: isSelected ? item.bg : T.panel,
+2297:                                                     borderColor: isSelected ? item.color : T.panelBorder,
+2298:                                                     boxShadow: isSelected ? `0 0 16px ${item.color}33` : "none"
+2299:                                                 }}>
+2300:                                                 <div className="flex items-center justify-between mb-2">
+2301:                                                     <span className="p-1.5 rounded-lg flex items-center justify-center" style={{ background: item.bg, border: `1px solid ${item.border}` }}>
+2302:                                                         <item.icon size={13} style={{ color: item.color }} />
+2303:                                                     </span>
+2304:                                                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: T.textFaint }}>
+2305:                                                         {pctVal}%
+2306:                                                     </span>
+2307:                                                 </div>
+2308:                                                 <p className="text-xl font-black" style={{ color: T.text }}>{count}</p>
+2309:                                                 <p className="text-[11px] font-medium truncate mt-0.5" style={{ color: item.color }}>{item.label}</p>
+2310:                                             </div>
+2311:                                         );
+2312:                                     })}
+2313:                                 </div>
+2314:                             </div>
+2315: 
+2316:                             {/* Critical Alerts */}
+2317:                             <Panel T={T} style={needsAttention.length > 0 ? { background: "rgba(239,68,68,0.035)", borderColor: "rgba(239,68,68,0.2)" } : {}}>
+2318:                                 <PanelHeader T={T}
+2319:                                     title={<span className="flex items-center gap-2"><ShieldAlert size={15} className="text-red-400" /> Critical Alerts</span>}
+2320:                                     sub={(loading || dashboardLoading) ? "Scanning conversations…" : dashboardError ? "Unable to load right now" : needsAttention.length > 0 ? `${needsAttention.length} conversation${needsAttention.length !== 1 ? "s" : ""} need review` : "Nothing needs your attention right now"}
+2321:                                 />
+2322:                                 {(loading || dashboardLoading) ? (
+2323:                                     <div className="space-y-2"><Skeleton T={T} className="h-14" /><Skeleton T={T} className="h-14" /></div>
+2324:                                 ) : needsAttention.length === 0 ? (
+2325:                                     <div className="flex items-center gap-3 py-6 justify-center" style={{ color: T.textFaint }}>
+2326:                                         <CheckCircle size={18} className="text-emerald-400" />
+2327:                                         <span className="text-sm">All clear — your team is performing well.</span>
+2328:                                     </div>
+2329:                                 ) : (
+2330:                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+2331:                                         {needsAttention.map(call => {
+2332:                                             const risk = RISK_CFG[call.riskLevel];
+2333:                                             return (
+2334:                                                 <Link key={call.id} to={`/w/${user?.companySlug || "default"}/calls/${call.id}`}
+2335:                                                     className="flex items-center gap-3 p-3.5 rounded-xl transition-all group"
+2336:                                                     style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}
+2337:                                                     onMouseEnter={e => { e.currentTarget.style.borderColor = `${risk.color}55`; }}
+2338:                                                     onMouseLeave={e => { e.currentTarget.style.borderColor = T.panelBorder; }}>
+2339:                                                     <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: risk.bg, border: `1px solid ${risk.border}` }}>
+2340:                                                         <risk.Icon size={16} style={{ color: risk.color }} />
+2341:                                                     </div>
+2342:                                                     <div className="flex-1 min-w-0">
+2343:                                                         <p className="text-sm font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p>
+2344:                                                         <p className="text-xs truncate" style={{ color: T.textFaint }}>
+2345:                                                             {call.overallScore != null ? `Scored ${call.overallScore}/100` : "Negative sentiment"} · {timeAgo(call.createdAt)}
+2346:                                                         </p>
+2347:                                                     </div>
+2348:                                                     <span className="text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0" style={{ background: risk.bg, color: risk.color }}>
+2349:                                                         {risk.label}
+2350:                                                     </span>
+2351:                                                     <ArrowUpRight size={13} className="flex-shrink-0 transition-colors" style={{ color: T.textFaint }} />
+2352:                                                 </Link>
+2353:                                             );
+2354:                                         })}
+2355:                                     </div>
+2356:                                 )}
+2357:                             </Panel>
+2358: 
+2359:                             {/* Top Calls */}
+2360:                             {!loading && topCalls.length > 0 && (
+2361:                                 <div>
+2362:                                     <div className="mb-2.5">
+2363:                                         <SectionLabel T={T} icon={Crown} tone="#f59e0b">Top Calls This Period</SectionLabel>
+2364:                                     </div>
+2365:                                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+2366:                                         {topCalls.map((call, i) => (
+2367:                                             <Link key={call.id} to={`/w/${user?.companySlug || "default"}/calls/${call.id}`}
+2368:                                                 className="flex items-center gap-2.5 p-3 rounded-xl transition-all"
+2369:                                                 style={{ background: T.panel, border: `1px solid ${T.panelBorder}` }}>
+2370:                                                 <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: `${MEDALS[i]}22`, border: `1px solid ${MEDALS[i]}55` }}>
+2371:                                                     {i === 0 ? <Crown size={13} style={{ color: MEDALS[i] }} /> : <Medal size={12} style={{ color: MEDALS[i] }} />}
+2372:                                                 </div>
+2373:                                                 <div className="flex-1 min-w-0">
+2374:                                                     <p className="text-xs font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p>
+2375:                                                     <p className="text-[10px] truncate" style={{ color: T.textFaint }}>{timeAgo(call.createdAt)}</p>
+2376:                                                 </div>
+2377:                                                 <span className="text-sm font-black flex-shrink-0" style={{ color: "#8b5cf6" }}>{call.overallScore}</span>
+2378:                                             </Link>
+2379:                                         ))}
+2380:                                     </div>
+2381:                                 </div>
+2382:                             )}
+2383:                         </div>
+2384:                     )}
+2385: 
+2386:                     {/* ══════════════════════════════════════════════════
+2387:                         RECENT CALLS INBOX + DETAIL PANE (full width)
+2388:                         ══════════════════════════════════════════════════ */}
+2389:                     {totalCalls > 0 && (
+2390:                         <>

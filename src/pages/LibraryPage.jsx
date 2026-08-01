@@ -120,7 +120,7 @@ export default function LibraryPage() {
     const fetchCalls = useCallback(async () => {
         setLoading(true); setError(null);
         try {
-            const res = await api.get("/api/calls/my-calls");
+            const res = await api.get("/api/calls");
             setCalls([...res.data].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
         } catch (err) {
             console.error("Failed to fetch library:", err);
@@ -460,7 +460,7 @@ export default function LibraryPage() {
                                 <button onClick={() => toggleFavorite(previewCall.id)} className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg" style={{ background: T.panelHover, color: T.text }}>
                                     <Star size={13} fill={favorites.has(previewCall.id) ? "#f59e0b" : "none"} style={{ color: favorites.has(previewCall.id) ? "#f59e0b" : T.textMuted }} /> {favorites.has(previewCall.id) ? "Favorited" : "Favorite"}
                                 </button>
-                                <Link to={`/calls/${previewCall.id}`} className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg text-white" style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>
+                                <Link to={`/w/${getUser()?.companySlug || "default"}/calls/${previewCall.id}`} className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg text-white" style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>
                                     <PlayCircle size={13} /> Open Full Details
                                 </Link>
                             </div>

@@ -308,7 +308,7 @@ export default function AIInsightsPage() {
                                     <PanelHeader T={T} title="Conversations Flagged For Review" sub="Calls that landed below your usual bar this period" />
                                     <div className="space-y-2">
                                         {needsAttention.slice(0, 6).map(call => (
-                                            <Link key={call.id} to={`/calls/${call.id}`} className="flex items-center justify-between p-3 rounded-xl transition-colors" style={{ background: T.panel, border: `1px solid ${T.panelBorder}` }}>
+                                            <Link key={call.id} to={`/w/${getUser()?.companySlug || "default"}/calls/${call.id}`} className="flex items-center justify-between p-3 rounded-xl transition-colors" style={{ background: T.panel, border: `1px solid ${T.panelBorder}` }}>
                                                 <div className="min-w-0"><p className="text-xs font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p><p className="text-[10px]" style={{ color: T.textFaint }}>{call.createdAt ? new Date(call.createdAt).toLocaleDateString() : ""}</p></div>
                                                 <div className="flex items-center gap-2 flex-shrink-0">{call.overallScore != null && <span className="text-xs font-black" style={{ color: "#f87171" }}>{call.overallScore}</span>}<ArrowRight size={12} style={{ color: T.textFaint }} /></div>
                                             </Link>

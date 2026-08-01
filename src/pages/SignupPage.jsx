@@ -293,7 +293,7 @@ function SignupForm() {
       });
       storeSession(res.data);
       setSuccess(true);
-      setTimeout(() => navigate("/dashboard", { replace: true }), 900);
+      setTimeout(() => navigate("/dashboard", { replace: true }), 400);
     } catch (err) {
       const msg = err.response?.data?.message
         || err.response?.data?.error

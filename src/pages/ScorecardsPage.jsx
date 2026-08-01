@@ -86,7 +86,7 @@ export default function ScorecardsPage() {
 
     const fetchCalls = useCallback(async () => {
         setLoading(true); setError(null);
-        try { const res = await api.get("/api/calls/my-calls"); setCalls([...res.data].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))); }
+        try { const res = await api.get("/api/calls"); setCalls([...res.data].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))); }
         catch (err) { console.error(err); setError("Failed to load scorecards."); }
         finally { setLoading(false); }
     }, []);
@@ -252,7 +252,7 @@ export default function ScorecardsPage() {
                                             <button onClick={() => toggleCompare(call.id)} className="flex-shrink-0">
                                                 {checked ? <CheckCircle2 size={16} style={{ color: "#8b5cf6" }} /> : <div className="w-4 h-4 rounded-full" style={{ border: `1.5px solid ${T.textFaint}` }} />}
                                             </button>
-                                            <Link to={`/calls/${call.id}`} className="flex-1 min-w-0">
+                                            <Link to={`/w/${getUser()?.companySlug || "default"}/calls/${call.id}`} className="flex-1 min-w-0">
                                                 <p className="text-xs font-semibold truncate" style={{ color: T.text }}>{call.customerName || call.fileName}</p>
                                                 <p className="text-[10px]" style={{ color: T.textFaint }}>{call.createdAt ? new Date(call.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : ""} · {call.outcome || "No outcome logged"}</p>
                                             </Link>

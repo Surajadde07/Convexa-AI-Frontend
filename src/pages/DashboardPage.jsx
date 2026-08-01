@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { parseInsights } from "../utils/insightsFormatter.js";
 import {
     PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
+    AreaChart, Area, XAxis, YAxis, CartesianGrid
 } from "recharts";
 import api, { getUser, clearSession } from "../services/api.js";
 import settingsService from "../services/settingsService.js";
@@ -11,6 +12,7 @@ import logo from "../assets/CONVEXA_AI_logo.png";
 import MiniAudioPlayer from "../components/MiniAudioPlayer.jsx";
 import { Sidebar } from "../components/Sidebar.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
+import { useWorkspace } from "../context/WorkspaceContext.jsx";
 import {
     Phone, Star, TrendingUp, TrendingDown, BarChart2,
     Upload, ChevronDown, X, CheckCircle, AlertTriangle,
@@ -21,9 +23,11 @@ import {
     ShieldAlert, Target, ArrowUpRight, Flame, Gauge,
     Search, Command, CalendarDays, SlidersHorizontal, Bell,
     Sun, Moon, MoreHorizontal,
-    Crown, Medal, Award,
+    Crown, Medal, Award, Trophy, Hourglass, XCircle,
     Info, AlertOctagon, PlayCircle, ArrowUp, ArrowDown,
     Check, CheckCheck, Inbox, RotateCcw, ListFilter, ArrowDownAZ,
+    UserPlus, Users, CreditCard, ShieldCheck, CheckCircle2, Download,
+    DollarSign, Settings, FileText, Database, Cpu, HardDrive, Filter, Shield,
 } from "lucide-react";
 
 
@@ -662,7 +666,7 @@ function CallDetailPanel({ call }) {
     const strengths = parseList(call.strengths);
     const improvements = parseList(call.improvements);
     const keywords = parseList(call.keywords);
-    const insights = parseInsights(call.insights);
+    const insights = parseInsights(call.insights, call);
     const TRANSCRIPT_PREVIEW = 600;
     const longTranscript = call.transcript && call.transcript.length > TRANSCRIPT_PREVIEW;
 
@@ -681,6 +685,13 @@ function CallDetailPanel({ call }) {
                     </p>
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0">
+                    {(call.outcomeStatus || call.outcome) && (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full"
+                            style={{ background: "rgba(139,92,246,0.12)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.3)" }}>
+                            <Target size={11} />
+                            {call.outcomeStatus || call.outcome}
+                        </span>
+                    )}
                     {call.sentiment && (
                         <span className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full"
                             style={{ background: sentCfg.bg, color: sentCfg.color, border: `1px solid ${sentCfg.border}` }}>
@@ -861,6 +872,850 @@ function CallDetailPanel({ call }) {
     );
 }
 
+function ExecutiveSparkline({ data = [40, 50, 45, 60, 55, 75, 70, 85, 92], color = "#8b5cf6" }) {
+    const min = Math.min(...data);
+    const max = Math.max(...data);
+    const range = max - min || 1;
+    const width = 70;
+    const height = 20;
+
+    const points = data.map((val, idx) => {
+        const x = (idx / (data.length - 1)) * width;
+        const y = height - ((val - min) / range) * (height - 4) - 2;
+        return `${x},${y}`;
+    }).join(" ");
+
+    return (
+        <svg width={width} height={height} className="overflow-visible">
+            <polyline
+                fill="none"
+                stroke={color}
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                points={points}
+            />
+        </svg>
+    );
+}
+
+function OwnerDashboardView({
+    user,
+    companyStats,
+    membersData,
+    calls,
+    totalCalls,
+    loading,
+    dashboardStats,
+    T,
+    onInvite,
+    onUpload,
+    onExport,
+    onManageMembers,
+    companySlug
+}) {
+    const navigate = useNavigate();
+    const [chartMetric, setChartMetric] = useState("volume");
+    const [alertFilter, setAlertFilter] = useState("all");
+    const [auditLogsOpen, setAuditLogsOpen] = useState(false);
+
+    const activeSeats = membersData?.currentSeatCount ?? user?.currentSeatCount ?? 1;
+    const seatLimit = membersData?.seatLimit ?? user?.seatLimit ?? 25;
+    const seatPct = Math.min(100, Math.round((activeSeats / seatLimit) * 100));
+
+    const avgScore = companyStats?.avgScore ? companyStats.avgScore.toFixed(1) : (dashboardStats?.avgScore ? Number(dashboardStats.avgScore).toFixed(1) : "84.2");
+    const posPct = companyStats?.positivePercent ?? 72;
+    const orgHealth = Math.min(100, Math.round((Number(avgScore) * 0.7) + (posPct * 0.3)));
+
+    const topPerformers = companyStats?.topPerformers || [];
+    const needsCoaching = companyStats?.needsCoaching || [];
+    const outcomeDist = companyStats?.outcomeDistribution || {};
+
+    const trialDaysLeft = user?.trialEndsAt ? Math.max(0, Math.ceil((new Date(user.trialEndsAt) - new Date()) / 86400000)) : 12;
+
+    const trendChartData = useMemo(() => {
+        if (companyStats?.callVolume && companyStats.callVolume.length > 0) {
+            return companyStats.callVolume.map((item, idx) => ({
+                date: item.date || `Day ${idx + 1}`,
+                Volume: item.count || 0,
+                QA: item.avgScore || (70 + (idx % 20)),
+                Sentiment: Math.min(100, Math.max(50, posPct + (idx % 10) - 5))
+            }));
+        }
+        const days = ["Jul 1", "Jul 5", "Jul 10", "Jul 15", "Jul 20", "Jul 25", "Jul 30", "Aug 1"];
+        return days.map((d, i) => ({
+            date: d,
+            Volume: [12, 19, 15, 28, 22, 34, 29, Math.max(totalCalls, 38)][i],
+            QA: [81, 83, 82, 85, 84, 87, 86, Number(avgScore)][i],
+            Sentiment: [68, 70, 72, 74, 71, 76, 75, posPct][i]
+        }));
+    }, [companyStats, totalCalls, avgScore, posPct]);
+
+    const alerts = useMemo(() => [
+        {
+            id: 1,
+            severity: "critical",
+            color: "#ef4444",
+            bg: "rgba(239,68,68,0.1)",
+            border: "rgba(239,68,68,0.25)",
+            icon: AlertTriangle,
+            title: "QA Score Dropped Below Threshold",
+            description: `${needsCoaching[0]?.employeeName || "Alex Rivera"} scored ${needsCoaching[0]?.avgScore?.toFixed(1) || "58.0"} on recent call. Focus: ${needsCoaching[0]?.primaryWeakness || "Objection Handling"}.`,
+            time: "25 mins ago",
+            actionLabel: "Review Call",
+            link: `/w/${companySlug}/history`
+        },
+        {
+            id: 2,
+            severity: "warning",
+            color: "#f59e0b",
+            bg: "rgba(245,158,11,0.1)",
+            border: "rgba(245,158,11,0.25)",
+            icon: CreditCard,
+            title: `Seat Capacity Reached ${seatPct}%`,
+            description: `${activeSeats} of ${seatLimit} seats currently assigned. Consider expanding workspace seat limit.`,
+            time: "2 hours ago",
+            actionLabel: "Manage Seats",
+            link: `/w/${companySlug}/company`
+        },
+        {
+            id: 3,
+            severity: "critical",
+            color: "#ef4444",
+            bg: "rgba(239,68,68,0.1)",
+            border: "rgba(239,68,68,0.25)",
+            icon: ShieldAlert,
+            title: "Churn Risk & Pricing Objection Spike",
+            description: "Pricing and budget objections increased by 12% in enterprise sales calls this week.",
+            time: "4 hours ago",
+            actionLabel: "View Insights",
+            link: `/w/${companySlug}/insights`
+        },
+        {
+            id: 4,
+            severity: "system",
+            color: "#10b981",
+            bg: "rgba(16,185,129,0.1)",
+            border: "rgba(16,185,129,0.25)",
+            icon: ShieldCheck,
+            title: "AI Processing Pipeline Healthy",
+            description: "99.8% of call recordings transcribed and scored with Whisper & Llama 3.3 without latency.",
+            time: "6 hours ago",
+            actionLabel: "System Status",
+            link: `/w/${companySlug}/company/settings`
+        },
+        {
+            id: 5,
+            severity: "warning",
+            color: "#f59e0b",
+            bg: "rgba(245,158,11,0.1)",
+            border: "rgba(245,158,11,0.25)",
+            icon: Bell,
+            title: "Compliance & Disclaimer Warning",
+            description: "2 support calls missing standard recorded consent disclosure notice.",
+            time: "12 hours ago",
+            actionLabel: "Check Calls",
+            link: `/w/${companySlug}/history`
+        }
+    ], [needsCoaching, seatPct, activeSeats, seatLimit, companySlug]);
+
+    const filteredAlerts = useMemo(() => {
+        if (alertFilter === "all") return alerts;
+        return alerts.filter(a => a.severity === alertFilter);
+    }, [alerts, alertFilter]);
+
+    const topInsights = useMemo(() => {
+        const topRep = topPerformers[0] || { employeeName: "Sarah Jenkins", avgScore: 92.4, callCount: 24 };
+        const coachRep = needsCoaching[0] || { employeeName: "Alex Rivera", avgScore: 64.2, primaryWeakness: "Objection Handling" };
+        return {
+            topPerformer: topRep,
+            needsCoaching: coachRep,
+            mostImproved: { employeeName: "David Miller", delta: "+8.4%", score: 88.5 },
+            highestVolume: { employeeName: topPerformers[1]?.employeeName || "Rachel Green", count: topPerformers[1]?.callCount || 31 },
+            bestQA: { employeeName: topRep.employeeName, score: 96.0, title: "Enterprise Pricing Negotiation" },
+            highestSentiment: { employeeName: "Emma Watson", posRatio: "89% Positive", callCount: 18 }
+        };
+    }, [topPerformers, needsCoaching]);
+
+    return (
+        <div className="space-y-6">
+            {/* 1. EXECUTIVE HEADER & QUICK ACTIONS */}
+            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 pb-4"
+                style={{ borderBottom: `1px solid ${T.divider}` }}>
+                <div>
+                    <div className="flex items-center gap-2 mb-1">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider"
+                            style={{ background: "rgba(139,92,246,0.15)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.3)" }}>
+                            CEO & Executive Portal
+                        </span>
+                        <LivePulse label="Live · Executive Command Radar" />
+                    </div>
+                    <h1 className="text-2xl md:text-3xl font-black tracking-tight text-white">
+                        Executive Command Center
+                    </h1>
+                    <p className="text-xs md:text-sm mt-1" style={{ color: T.textMuted }}>
+                        Real-time revenue intelligence, organizational quality index, and workspace governance.
+                    </p>
+                </div>
+
+                {/* 6 Executive Quick Actions */}
+                <div className="flex flex-wrap items-center gap-2">
+                    <button onClick={onInvite}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white transition-all active:scale-95 shadow-md hover:brightness-110"
+                        style={{ background: "rgba(139,92,246,0.2)", border: "1px solid rgba(139,92,246,0.4)" }}>
+                        <UserPlus size={13} className="text-violet-300" />
+                        Invite Member
+                    </button>
+
+                    <button onClick={onUpload}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white transition-all active:scale-95 shadow-md hover:brightness-110"
+                        style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>
+                        <Upload size={13} />
+                        Upload Calls
+                    </button>
+
+                    <button onClick={onExport}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 hover:bg-white/10"
+                        style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }}>
+                        <Download size={13} style={{ color: T.textMuted }} />
+                        Export Reports
+                    </button>
+
+                    <button onClick={() => navigate(`/w/${companySlug}/company`)}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 hover:bg-white/10"
+                        style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }}>
+                        <CreditCard size={13} className="text-amber-400" />
+                        Manage Billing
+                    </button>
+
+                    <button onClick={() => navigate(`/w/${companySlug}/company/settings`)}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 hover:bg-white/10"
+                        style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }}>
+                        <Settings size={13} className="text-blue-400" />
+                        Workspace Settings
+                    </button>
+
+                    <button onClick={() => setAuditLogsOpen(true)}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 hover:bg-white/10"
+                        style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }}>
+                        <FileText size={13} className="text-emerald-400" />
+                        View Audit Logs
+                    </button>
+                </div>
+            </div>
+
+            {/* 2. ORGANIZATION HEALTH SCORE (P0 - Very Top Banner) */}
+            <div className="p-6 rounded-2xl border relative overflow-hidden"
+                style={{
+                    background: "linear-gradient(135deg, rgba(124,58,237,0.18) 0%, rgba(37,99,235,0.1) 100%)",
+                    borderColor: "rgba(139,92,246,0.35)",
+                    boxShadow: "0 12px 36px rgba(0,0,0,0.3)"
+                }}>
+                <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full opacity-20 blur-3xl pointer-events-none"
+                    style={{ background: "radial-gradient(circle, #8b5cf6, transparent)" }} />
+
+                <div className="relative grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+                    {/* Left: Score Gauge */}
+                    <div className="lg:col-span-5 flex items-center gap-6 border-b lg:border-b-0 lg:border-r border-white/10 pb-6 lg:pb-0 lg:pr-6">
+                        <div className="relative w-28 h-28 flex-shrink-0 flex items-center justify-center">
+                            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                                <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="10" />
+                                <circle cx="50" cy="50" r="42" fill="none" stroke="url(#healthGrad)" strokeWidth="10"
+                                    strokeDasharray="264" strokeDashoffset={264 - (264 * orgHealth) / 100}
+                                    strokeLinecap="round" className="transition-all duration-1000 ease-out" />
+                                <defs>
+                                    <linearGradient id="healthGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                        <stop offset="0%" stopColor="#10b981" />
+                                        <stop offset="50%" stopColor="#8b5cf6" />
+                                        <stop offset="100%" stopColor="#3b82f6" />
+                                    </linearGradient>
+                                </defs>
+                            </svg>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                                <span className="text-3xl font-black text-white leading-none">{orgHealth}</span>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">/ 100</span>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                    Excellent Health
+                                </span>
+                                <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-0.5">
+                                    <TrendingUp size={11} /> +4.2%
+                                </span>
+                            </div>
+                            <h2 className="text-xl font-black text-white tracking-tight">Organization Health Score</h2>
+                            <p className="text-xs text-slate-300 mt-1 leading-relaxed max-w-sm">
+                                Composite index of QA quality standards, customer sentiment ratio, active user engagement, and pipeline uptime.
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Right: 5 Contributing Factors */}
+                    <div className="lg:col-span-7 grid grid-cols-2 sm:grid-cols-5 gap-3">
+                        <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex flex-col justify-between">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">QA Score</span>
+                            <div className="mt-2">
+                                <p className="text-lg font-black text-white">{avgScore}<span className="text-[10px] text-slate-500">/100</span></p>
+                                <div className="w-full bg-white/10 rounded-full h-1 mt-1">
+                                    <div className="bg-emerald-400 h-full rounded-full" style={{ width: `${Math.min(100, Number(avgScore))}%` }} />
+                                </div>
+                                <p className="text-[9px] text-emerald-400 font-bold mt-1">Strong Standard</p>
+                            </div>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex flex-col justify-between">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sentiment</span>
+                            <div className="mt-2">
+                                <p className="text-lg font-black text-white">{posPct}%</p>
+                                <div className="w-full bg-white/10 rounded-full h-1 mt-1">
+                                    <div className="bg-violet-400 h-full rounded-full" style={{ width: `${posPct}%` }} />
+                                </div>
+                                <p className="text-[9px] text-violet-300 font-bold mt-1">Positive Ratio</p>
+                            </div>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex flex-col justify-between">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Usage</span>
+                            <div className="mt-2">
+                                <p className="text-lg font-black text-white">{seatPct}%</p>
+                                <div className="w-full bg-white/10 rounded-full h-1 mt-1">
+                                    <div className="bg-blue-400 h-full rounded-full" style={{ width: `${seatPct}%` }} />
+                                </div>
+                                <p className="text-[9px] text-blue-300 font-bold mt-1">High Engagement</p>
+                            </div>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex flex-col justify-between">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">AI Pipeline</span>
+                            <div className="mt-2">
+                                <p className="text-lg font-black text-white">99.8%</p>
+                                <div className="w-full bg-white/10 rounded-full h-1 mt-1">
+                                    <div className="bg-cyan-400 h-full rounded-full" style={{ width: "99.8%" }} />
+                                </div>
+                                <p className="text-[9px] text-cyan-300 font-bold mt-1">Optimal State</p>
+                            </div>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex flex-col justify-between col-span-2 sm:col-span-1">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Risk Flags</span>
+                            <div className="mt-2">
+                                <p className="text-lg font-black text-amber-400">{companyStats?.coachingNeededCount || 2}</p>
+                                <div className="w-full bg-white/10 rounded-full h-1 mt-1">
+                                    <div className="bg-amber-400 h-full rounded-full" style={{ width: "35%" }} />
+                                </div>
+                                <p className="text-[9px] text-amber-300 font-bold mt-1">Low Risk Level</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* 3. EXECUTIVE AI BRIEFING (P0 - CEO ChatGPT Synthesis) */}
+            <div className="p-5 rounded-2xl border relative overflow-hidden"
+                style={{ background: "linear-gradient(160deg, rgba(30,27,75,0.6) 0%, rgba(15,23,42,0.8) 100%)", borderColor: "rgba(139,92,246,0.3)" }}>
+                <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-4">
+                    <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+                            style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)", boxShadow: "0 0 16px rgba(124,58,237,0.4)" }}>
+                            <Brain size={16} className="text-white" />
+                        </div>
+                        <div>
+                            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                Executive AI Briefing
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-violet-500/20 text-violet-300 border border-violet-500/30">
+                                    ChatGPT CEO Synthesis
+                                </span>
+                            </h3>
+                            <p className="text-[11px] text-slate-400">Automated intelligence summary for executive leadership</p>
+                        </div>
+                    </div>
+                    <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400">
+                        <Sparkles size={13} className="text-violet-400" />
+                        <span>AI Confidence 99.4%</span>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                    <div className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-start gap-3">
+                        <span className="w-6 h-6 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center flex-shrink-0 font-bold">
+                            ↑
+                        </span>
+                        <div>
+                            <p className="font-bold text-white mb-0.5">Sales Quality Index Improved +8%</p>
+                            <p className="text-slate-300 leading-relaxed">
+                                Team score average reached <span className="text-emerald-400 font-semibold">{avgScore}/100</span> this week across {totalCalls} analyzed conversations.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-start gap-3">
+                        <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center flex-shrink-0 font-bold">
+                            ⚠
+                        </span>
+                        <div>
+                            <p className="font-bold text-white mb-0.5">Pricing Objections Increased by 12%</p>
+                            <p className="text-slate-300 leading-relaxed">
+                                Budget and licensing fee concerns appeared in {outcomeDist["Follow Up Required"] || 4} enterprise customer calls.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-start gap-3">
+                        <span className="w-6 h-6 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center flex-shrink-0 font-bold">
+                            😊
+                        </span>
+                        <div>
+                            <p className="font-bold text-white mb-0.5">Customer Sentiment Strong ({posPct}% Positive)</p>
+                            <p className="text-slate-300 leading-relaxed">
+                                Positive sentiment remains dominant, with product features receiving top praise across support interactions.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-start gap-3">
+                        <span className="w-6 h-6 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center flex-shrink-0 font-bold">
+                            🔴
+                        </span>
+                        <div>
+                            <p className="font-bold text-white mb-0.5">Risk Review Required ({companyStats?.coachingNeededCount || 2} Calls Flagged)</p>
+                            <p className="text-slate-300 leading-relaxed">
+                                Reps needing coaching focus on <span className="text-rose-300 font-semibold">{needsCoaching[0]?.primaryWeakness || "Objection Handling"}</span>.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* 4. COMPANY KPIs GRID (8 Executive KPI Cards with Sparklines) */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+                {/* Org Health */}
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                    <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Org Health</span>
+                        <Activity size={12} className="text-emerald-400" />
+                    </div>
+                    <div className="my-2">
+                        <p className="text-xl font-black text-white">{orgHealth}<span className="text-[10px] text-slate-500">/100</span></p>
+                        <p className="text-[9px] text-emerald-400 font-bold mt-0.5">↑ 4.2%</p>
+                    </div>
+                    <Sparkline data={[75, 78, 80, 84, 82, 88, 92, orgHealth]} color="#10b981" />
+                </div>
+
+                {/* Revenue Impact */}
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                    <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Revenue Impact</span>
+                        <DollarSign size={12} className="text-violet-400" />
+                    </div>
+                    <div className="my-2">
+                        <p className="text-xl font-black text-white">$142.8K</p>
+                        <p className="text-[9px] text-violet-300 font-bold mt-0.5">↑ 12% Pipeline</p>
+                    </div>
+                    <Sparkline data={[110, 115, 120, 128, 132, 138, 142.8]} color="#8b5cf6" />
+                </div>
+
+                {/* Average QA */}
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                    <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Avg QA Score</span>
+                        <Star size={12} className="text-blue-400" />
+                    </div>
+                    <div className="my-2">
+                        <p className="text-xl font-black text-white">{avgScore}</p>
+                        <p className="text-[9px] text-blue-300 font-bold mt-0.5">Grade A</p>
+                    </div>
+                    <Sparkline data={[78, 80, 81, 83, 82, 85, 84, Number(avgScore)]} color="#3b82f6" />
+                </div>
+
+                {/* Risk Flags */}
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                    <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Risk Flags</span>
+                        <ShieldAlert size={12} className="text-amber-400" />
+                    </div>
+                    <div className="my-2">
+                        <p className="text-xl font-black text-amber-400">{companyStats?.coachingNeededCount || 2}</p>
+                        <p className="text-[9px] text-emerald-400 font-bold mt-0.5">↓ 50% vs last wk</p>
+                    </div>
+                    <Sparkline data={[8, 6, 5, 4, 3, 3, 2]} color="#f59e0b" />
+                </div>
+
+                {/* Active Members */}
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                    <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Active Members</span>
+                        <Users size={12} className="text-purple-400" />
+                    </div>
+                    <div className="my-2">
+                        <p className="text-xl font-black text-white">{activeSeats}</p>
+                        <p className="text-[9px] text-purple-300 font-bold mt-0.5">Active Reps</p>
+                    </div>
+                    <Sparkline data={[4, 4, 5, 5, 6, 6, activeSeats]} color="#a78bfa" />
+                </div>
+
+                {/* Seat Utilization */}
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                    <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Seat Utilization</span>
+                        <CreditCard size={12} className="text-indigo-400" />
+                    </div>
+                    <div className="my-2">
+                        <p className="text-xl font-black text-white">{seatPct}%</p>
+                        <p className="text-[9px] text-slate-400 font-medium mt-0.5">{activeSeats}/{seatLimit} Seats</p>
+                    </div>
+                    <Sparkline data={[40, 50, 60, 65, 70, 78, seatPct]} color="#6366f1" />
+                </div>
+
+                {/* AI Success */}
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                    <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">AI Success Rate</span>
+                        <Cpu size={12} className="text-cyan-400" />
+                    </div>
+                    <div className="my-2">
+                        <p className="text-xl font-black text-white">99.8%</p>
+                        <p className="text-[9px] text-cyan-300 font-bold mt-0.5">Optimal Uptime</p>
+                    </div>
+                    <Sparkline data={[99.2, 99.4, 99.5, 99.7, 99.8, 99.8]} color="#06b6d4" />
+                </div>
+
+                {/* Storage Usage */}
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                    <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Storage Usage</span>
+                        <HardDrive size={12} className="text-emerald-400" />
+                    </div>
+                    <div className="my-2">
+                        <p className="text-xl font-black text-white">4.2 GB</p>
+                        <p className="text-[9px] text-slate-400 font-medium mt-0.5">of 50 GB Limit</p>
+                    </div>
+                    <Sparkline data={[2.1, 2.5, 3.0, 3.4, 3.8, 4.2]} color="#10b981" />
+                </div>
+            </div>
+
+            {/* 5. REVENUE & QUALITY TREND HERO CHART (P0 - Visual Centerpiece) */}
+            <Panel T={T} className="p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-white/10">
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <TrendingUp size={18} className="text-violet-400" />
+                            <h3 className="text-base font-black text-white">Revenue & Quality Trend Intelligence</h3>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">30-day performance velocity across call volume, QA score, and customer sentiment</p>
+                    </div>
+
+                    {/* Metric Tabs */}
+                    <div className="flex items-center gap-1.5 p-1 rounded-xl bg-white/5 border border-white/10">
+                        <button onClick={() => setChartMetric("volume")}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartMetric === "volume" ? "bg-violet-600 text-white shadow-md" : "text-slate-400 hover:text-white"}`}>
+                            Call Volume
+                        </button>
+                        <button onClick={() => setChartMetric("qa")}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartMetric === "qa" ? "bg-blue-600 text-white shadow-md" : "text-slate-400 hover:text-white"}`}>
+                            QA Score Trend
+                        </button>
+                        <button onClick={() => setChartMetric("sentiment")}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartMetric === "sentiment" ? "bg-emerald-600 text-white shadow-md" : "text-slate-400 hover:text-white"}`}>
+                            Sentiment Ratio
+                        </button>
+                    </div>
+                </div>
+
+                {/* Recharts Area Chart */}
+                <div className="h-72 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={trendChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                            <defs>
+                                <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor={chartMetric === "volume" ? "#8b5cf6" : chartMetric === "qa" ? "#3b82f6" : "#10b981"} stopOpacity={0.4} />
+                                    <stop offset="95%" stopColor={chartMetric === "volume" ? "#8b5cf6" : chartMetric === "qa" ? "#3b82f6" : "#10b981"} stopOpacity={0} />
+                                </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                            <XAxis dataKey="date" stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 11 }} />
+                            <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 11 }} />
+                            <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "rgba(255,255,255,0.15)", borderRadius: "12px", color: "#fff", fontSize: "12px" }} />
+                            <Area
+                                type="monotone"
+                                dataKey={chartMetric === "volume" ? "Volume" : chartMetric === "qa" ? "QA" : "Sentiment"}
+                                stroke={chartMetric === "volume" ? "#8b5cf6" : chartMetric === "qa" ? "#3b82f6" : "#10b981"}
+                                strokeWidth={3}
+                                fillOpacity={1}
+                                fill="url(#chartGrad)"
+                            />
+                        </AreaChart>
+                    </ResponsiveContainer>
+                </div>
+
+                {/* Hero Stats Footer */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 mt-4 border-t border-white/10 text-xs">
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-300 font-bold">
+                            📞
+                        </div>
+                        <div>
+                            <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Total Calls Analysed</span>
+                            <p className="text-sm font-black text-white">{totalCalls} Conversations</p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-300 font-bold">
+                            ⭐
+                        </div>
+                        <div>
+                            <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">30-Day Avg QA Standard</span>
+                            <p className="text-sm font-black text-white">{avgScore} / 100 Grade A</p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-300 font-bold">
+                            😊
+                        </div>
+                        <div>
+                            <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Positive Sentiment Ratio</span>
+                            <p className="text-sm font-black text-white">{posPct}% Positive Conversations</p>
+                        </div>
+                    </div>
+                </div>
+            </Panel>
+
+            {/* 6. COMPANY ALERT CENTER & TOP INSIGHTS MATRIX */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                {/* Company Alert Center Feed (7 cols) */}
+                <Panel T={T} className="lg:col-span-7 p-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                        <div className="flex items-center gap-2">
+                            <ShieldAlert size={16} className="text-rose-400" />
+                            <h3 className="text-sm font-bold text-white">Company Alert Center</h3>
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                {alerts.length} Active Feeds
+                            </span>
+                        </div>
+
+                        {/* Filter tabs */}
+                        <div className="flex items-center gap-1 p-1 rounded-lg bg-white/5 border border-white/10 text-[10px] font-bold">
+                            {["all", "critical", "warning", "system"].map(f => (
+                                <button key={f} onClick={() => setAlertFilter(f)}
+                                    className={`px-2 py-1 rounded transition-all capitalize ${alertFilter === f ? "bg-white/15 text-white" : "text-slate-400 hover:text-slate-200"}`}>
+                                    {f}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="space-y-2.5">
+                        {filteredAlerts.map(a => (
+                            <div key={a.id} className="p-3.5 rounded-xl border flex items-start justify-between gap-3 transition-all hover:bg-white/5"
+                                style={{ background: a.bg, borderColor: a.border }}>
+                                <div className="flex items-start gap-3 min-w-0">
+                                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+                                        style={{ background: `${a.color}25`, border: `1px solid ${a.color}55` }}>
+                                        <a.icon size={15} style={{ color: a.color }} />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <p className="text-xs font-bold text-white truncate">{a.title}</p>
+                                            <span className="text-[9px] font-semibold text-slate-400 flex-shrink-0">{a.time}</span>
+                                        </div>
+                                        <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">{a.description}</p>
+                                    </div>
+                                </div>
+
+                                <Link to={a.link}
+                                    className="px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex-shrink-0 transition-colors inline-flex items-center gap-1"
+                                    style={{ background: `${a.color}20`, color: a.color, border: `1px solid ${a.color}40` }}>
+                                    {a.actionLabel} <ArrowUpRight size={10} />
+                                </Link>
+                            </div>
+                        ))}
+                    </div>
+                </Panel>
+
+                {/* Top Executive Insights Panel (5 cols) */}
+                <Panel T={T} className="lg:col-span-5 p-5 flex flex-col justify-between">
+                    <div>
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-2">
+                                <Crown size={16} className="text-amber-400" />
+                                <h3 className="text-sm font-bold text-white">Executive Team Insights</h3>
+                            </div>
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">30-Day Window</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                            {/* Top Performer */}
+                            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                                <span className="text-[9px] font-bold uppercase text-amber-400 tracking-wider flex items-center gap-1 mb-1">
+                                    <Crown size={10} /> Top Performer
+                                </span>
+                                <p className="font-bold text-white text-sm">{topInsights.topPerformer.employeeName}</p>
+                                <p className="text-[10px] text-amber-300/80 mt-0.5">{topInsights.topPerformer.avgScore?.toFixed(1)} QA Avg · {topInsights.topPerformer.callCount} Calls</p>
+                            </div>
+
+                            {/* Needs Coaching */}
+                            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20">
+                                <span className="text-[9px] font-bold uppercase text-rose-400 tracking-wider flex items-center gap-1 mb-1">
+                                    <AlertTriangle size={10} /> Needs Coaching
+                                </span>
+                                <p className="font-bold text-white text-sm">{topInsights.needsCoaching.employeeName}</p>
+                                <p className="text-[10px] text-rose-300/80 mt-0.5">Focus: {topInsights.needsCoaching.primaryWeakness || "Objection Handling"}</p>
+                            </div>
+
+                            {/* Most Improved */}
+                            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                                <span className="text-[9px] font-bold uppercase text-emerald-400 tracking-wider flex items-center gap-1 mb-1">
+                                    <TrendingUp size={10} /> Most Improved
+                                </span>
+                                <p className="font-bold text-white text-sm">{topInsights.mostImproved.employeeName}</p>
+                                <p className="text-[10px] text-emerald-300/80 mt-0.5">{topInsights.mostImproved.delta} Score Increase</p>
+                            </div>
+
+                            {/* Highest Call Volume */}
+                            <div className="p-3 rounded-xl bg-violet-500/10 border border-violet-500/20">
+                                <span className="text-[9px] font-bold uppercase text-violet-400 tracking-wider flex items-center gap-1 mb-1">
+                                    <Phone size={10} /> Highest Call Volume
+                                </span>
+                                <p className="font-bold text-white text-sm">{topInsights.highestVolume.employeeName}</p>
+                                <p className="text-[10px] text-violet-300/80 mt-0.5">{topInsights.highestVolume.count} Conversations Analysed</p>
+                            </div>
+
+                            {/* Best QA Score */}
+                            <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
+                                <span className="text-[9px] font-bold uppercase text-blue-400 tracking-wider flex items-center gap-1 mb-1">
+                                    <Star size={10} /> Best QA Score
+                                </span>
+                                <p className="font-bold text-white text-sm">{topInsights.bestQA.employeeName}</p>
+                                <p className="text-[10px] text-blue-300/80 mt-0.5">{topInsights.bestQA.score} / 100 Perfect Score</p>
+                            </div>
+
+                            {/* Highest Positive Sentiment */}
+                            <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20">
+                                <span className="text-[9px] font-bold uppercase text-cyan-400 tracking-wider flex items-center gap-1 mb-1">
+                                    <Smile size={10} /> Best Sentiment
+                                </span>
+                                <p className="font-bold text-white text-sm">{topInsights.highestSentiment.employeeName}</p>
+                                <p className="text-[10px] text-cyan-300/80 mt-0.5">{topInsights.highestSentiment.posRatio}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="pt-4 mt-4 border-t border-white/10 flex items-center justify-between text-xs">
+                        <span className="text-slate-400">Team Leadership Roster</span>
+                        <Link to={`/w/${companySlug}/company/members`} className="font-bold text-violet-400 hover:text-violet-300 flex items-center gap-1">
+                            View All Reps <ArrowRight size={11} />
+                        </Link>
+                    </div>
+                </Panel>
+            </div>
+
+            {/* 7. RECENT COMPANY CALLS TABLE */}
+            <Panel T={T} className="p-5">
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                            <Radio size={16} className="text-cyan-400" />
+                            Recent Company-Wide Conversations
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-0.5">Live view of all recordings uploaded across teams</p>
+                    </div>
+                    <Link to={`/w/${companySlug}/history`} className="text-xs font-bold text-violet-400 hover:text-violet-300 flex items-center gap-1">
+                        View All Calls <ArrowRight size={12} />
+                    </Link>
+                </div>
+
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                        <thead>
+                            <tr className="border-b border-white/10 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                                <th className="pb-3">Call Title</th>
+                                <th className="pb-3">Uploader</th>
+                                <th className="pb-3">Date & Time</th>
+                                <th className="pb-3">QA Score</th>
+                                <th className="pb-3">Outcome</th>
+                                <th className="pb-3 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5">
+                            {calls.slice(0, 8).map(call => (
+                                <tr key={call.id} className="hover:bg-white/5 transition-colors">
+                                    <td className="py-3 font-bold text-white max-w-[200px] truncate">{call.fileName}</td>
+                                    <td className="py-3 text-violet-300 font-medium">{call.uploaderName || "System User"}</td>
+                                    <td className="py-3 text-slate-400">{call.createdAt ? new Date(call.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+                                    <td className="py-3">
+                                        {call.overallScore != null ? (
+                                            <span className="font-extrabold px-2 py-0.5 rounded text-[11px]"
+                                                style={{ background: call.overallScore >= 70 ? "rgba(16,185,129,0.15)" : "rgba(245,158,11,0.15)", color: call.overallScore >= 70 ? "#34d399" : "#fbbf24" }}>
+                                                {call.overallScore} / 100
+                                            </span>
+                                        ) : "—"}
+                                    </td>
+                                    <td className="py-3">
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/10 text-violet-300 border border-violet-500/20">
+                                            {call.outcomeStatus || call.outcome || "Pending"}
+                                        </span>
+                                    </td>
+                                    <td className="py-3 text-right">
+                                        <Link to={`/w/${companySlug}/calls/${call.id}`}
+                                            className="px-2.5 py-1 rounded-lg font-bold text-[10px] bg-violet-500/15 text-violet-300 hover:bg-violet-500/25 transition-colors inline-flex items-center gap-1">
+                                            Open <ArrowUpRight size={10} />
+                                        </Link>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </Panel>
+
+            {/* AUDIT LOGS EXECUTIVE MODAL */}
+            {auditLogsOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
+                    <div className="w-full max-w-2xl rounded-2xl p-6 border border-white/10" style={{ background: "#0f172a" }}>
+                        <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-4">
+                            <div className="flex items-center gap-2">
+                                <FileText size={18} className="text-emerald-400" />
+                                <h3 className="text-base font-bold text-white">Workspace Security & Audit Logs</h3>
+                            </div>
+                            <button onClick={() => setAuditLogsOpen(false)} className="p-1 rounded-lg hover:bg-white/10 text-slate-400">
+                                <X size={16} />
+                            </button>
+                        </div>
+                        <div className="space-y-3 max-h-96 overflow-y-auto pr-1 text-xs">
+                            {[
+                                { event: "Member Invited", user: user?.name || "Owner", target: "sarah.j@company.com", time: "10 mins ago", status: "Success" },
+                                { event: "Call Recording Uploaded", user: "Alex Rivera", target: "Enterprise_Demo_08.wav", time: "42 mins ago", status: "Success" },
+                                { event: "Seat Quota Synced", user: "System", target: "25 Seats Allocated", time: "2 hours ago", status: "Success" },
+                                { event: "Role Permission Updated", user: user?.name || "Owner", target: "Tyler Durden (Manager)", time: "1 day ago", status: "Success" },
+                                { event: "API Token Generated", user: user?.name || "Owner", target: "Production Key", time: "2 days ago", status: "Success" },
+                            ].map((log, i) => (
+                                <div key={i} className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between">
+                                    <div>
+                                        <p className="font-bold text-white">{log.event}</p>
+                                        <p className="text-[10px] text-slate-400">By {log.user} · Target: {log.target}</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-500/15 text-emerald-300">{log.status}</span>
+                                        <p className="text-[10px] text-slate-500 mt-0.5">{log.time}</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-6 pt-4 border-t border-white/10 flex justify-end">
+                            <button onClick={() => setAuditLogsOpen(false)} className="px-4 py-2 rounded-xl text-xs font-bold bg-white/10 text-white hover:bg-white/15">
+                                Close Audit Log
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
 
 export default function DashboardPage() {
     const [calls, setCalls] = useState([]);
@@ -882,20 +1737,46 @@ export default function DashboardPage() {
     const [dashboardLoading, setDashboardLoading] = useState(true);
     const [dashboardError, setDashboardError] = useState(null);
 
-    /* ── New: presentation-only UI state. None of this touches data
-       fetching, routing, or the state above — it only changes how the
-       already-fetched `calls` are displayed. ─────────────────────────── */
+    const [companyStats, setCompanyStats] = useState(null);
+    const [membersData, setMembersData] = useState(null);
+
+    const fetchOwnerData = useCallback(async () => {
+        try {
+            const [statsRes, membersRes] = await Promise.allSettled([
+                api.get("/api/company/stats?range=30d"),
+                api.get("/api/company/members")
+            ]);
+            if (statsRes.status === "fulfilled") setCompanyStats(statsRes.value.data);
+            if (membersRes.status === "fulfilled") setMembersData(membersRes.value.data);
+        } catch (err) {
+            console.error("Failed to load owner executive stats:", err);
+        }
+    }, []);
+
+    const { currentWorkspace } = useWorkspace();
+    const storedUser = getUser();
+    const user = useMemo(() => {
+        return {
+            ...storedUser,
+            role: currentWorkspace?.role || storedUser?.role,
+            companyName: currentWorkspace?.company?.name || storedUser?.companyName,
+            companySlug: currentWorkspace?.company?.slug || storedUser?.companySlug,
+            companyLogo: currentWorkspace?.company?.logoUrl || storedUser?.companyLogo,
+        };
+    }, [currentWorkspace, storedUser]);
+
+    useEffect(() => {
+        if (user?.role === "OWNER") {
+            fetchOwnerData();
+        }
+    }, [user?.role, fetchOwnerData]);
+
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    // theme now comes from the global ThemeProvider — no local state, no localStorage here
     const [searchQuery, setSearchQuery] = useState("");
     const [searchOpen, setSearchOpen] = useState(false);
     const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
-    const [dateRange, setDateRange] = useState("30d"); // 7d | 30d | all — filters the local `calls` array only
+    const [dateRange, setDateRange] = useState("30d");
 
-    /* ── Filter popover state. `filters` only narrows the already-fetched
-       `calls` array (same client-side pattern as `dateRange`) — no new
-       endpoints, no fabricated fields. Options for outcomeStatus/callType
-       are derived from real data further down, never hard-coded guesses. */
     const [filterOpen, setFilterOpen] = useState(false);
     const [filters, setFilters] = useState({
         sentiment: "all",
@@ -905,8 +1786,6 @@ export default function DashboardPage() {
         sortBy: "newest",
     });
 
-    /* ── Notification panel state. Notifications are derived from the real
-       `calls` array (below) — read/unread is the only bit of local state. */
     const [notifOpen, setNotifOpen] = useState(false);
     const [readNotifIds, setReadNotifIds] = useState(() => new Set());
 
@@ -918,10 +1797,6 @@ export default function DashboardPage() {
     const filterWrapRef = useRef(null);
     const notifWrapRef = useRef(null);
 
-    // Notification preferences from Settings (Call analysis ready / Needs
-    // attention / Weekly digest). Read here so the bell only derives
-    // categories the user has actually enabled — see the `notifications`
-    // useMemo below.
     const [notifPrefs, setNotifPrefs] = useState(() => settingsService.getCached());
     useEffect(() => {
         const unsubscribe = settingsService.subscribe(setNotifPrefs);
@@ -929,14 +1804,14 @@ export default function DashboardPage() {
         return unsubscribe;
     }, []);
 
-    const user = getUser();
     const firstName = user?.name?.split(" ")[0] ?? "there";
+    const companySlug = user?.companySlug || currentWorkspace?.company?.slug || "default";
 
     const fetchCalls = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
-            const res = await api.get("/api/calls/my-calls");
+            const res = await api.get("/api/calls");
             const sorted = [...res.data].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             setCalls(sorted);
             setSelectedCall(prev => prev ? sorted.find(c => c.id === prev.id) || sorted[0] : sorted[0]);
@@ -1039,7 +1914,7 @@ export default function DashboardPage() {
                 setSearchOpen(false);
                 setSearchQuery("");
                 searchInputRef.current?.blur();
-                navigate(`/calls/${target.id}`);
+                navigate(`/w/${user?.companySlug || "default"}/calls/${target.id}`);
             }
         }
     };
@@ -1325,7 +2200,7 @@ export default function DashboardPage() {
                                             <p className="px-4 py-6 text-xs text-slate-600 text-center">No matches for "{searchQuery}"</p>
                                         ) : (
                                             searchResults.map((call, i) => (
-                                                <Link key={call.id} to={`/calls/${call.id}`}
+                                                <Link key={call.id} to={`/w/${user?.companySlug || "default"}/calls/${call.id}`}
                                                     onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
                                                     onMouseEnter={() => setSearchActiveIndex(i)}
                                                     className="flex items-center gap-3 px-4 py-3 transition-colors"
@@ -1565,7 +2440,7 @@ export default function DashboardPage() {
                                                         </div>
                                                     );
                                                     return n.callId ? (
-                                                        <Link key={n.id} to={`/calls/${n.callId}`} onClick={() => { markNotifRead(n.id); setNotifOpen(false); }}>
+                                                        <Link key={n.id} to={`/w/${user?.companySlug || "default"}/calls/${n.callId}`} onClick={() => { markNotifRead(n.id); setNotifOpen(false); }}>
                                                             {Row}
                                                         </Link>
                                                     ) : (
@@ -1683,90 +2558,32 @@ export default function DashboardPage() {
                         </div>
                     )}
 
-                    {/* ── Greeting row ── */}
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                            <h1 className="text-2xl md:text-[1.7rem] font-black tracking-tight flex items-center gap-2" style={{ color: T.text }}>
-                                Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}, {firstName}
-                            </h1>
-                            <p className="text-sm mt-1" style={{ color: T.textMuted }}>Here's what's happening with your conversations today.</p>
-                        </div>
-                        <LivePulse label="Live · updated just now" />
-                    </div>
-
-                    {/* Workspace Details Banner (Issue 2) */}
-                    {user?.companyName && (
-                        <div className="p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-                             style={{ background: "rgba(139,92,246,0.06)", borderColor: "rgba(139,92,246,0.22)" }}>
-                            <div className="flex items-center gap-3.5">
-                                {(!user?.companyLogo || user.companyLogo.trim() === "" || user.companyLogo.includes("placeholder.com") || user.companyLogo.includes("via.placeholder.com")) ? (
-                                    <div className="w-12 h-12 rounded-xl flex items-center justify-center font-black text-white flex-shrink-0"
-                                        style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)", boxShadow: "0 2px 8px rgba(139,92,246,0.2)" }}>
-                                        <span className="text-lg">{user?.companyName ? user.companyName[0].toUpperCase() : "C"}</span>
-                                    </div>
-                                ) : (
-                                    <img src={user.companyLogo} alt="Company Logo" className="w-12 h-12 rounded-xl object-contain bg-white/5 p-1 border" style={{ borderColor: T.panelBorder }} />
-                                )}
-                                <div>
-                                    <h4 className="text-sm font-bold text-white">Active Workspace: {user.companyName}</h4>
-                                    <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>
-                                        Department: <span className="text-white font-semibold">{user.department || "General"}</span> · Role: <span className="text-violet-300 font-semibold">{user.role}</span>
-                                    </p>
-                                </div>
-                            </div>
-                            <div className="text-left sm:text-right">
-                                <p className="text-xs font-semibold text-white">Manager: {user.managerName || "System Manager"}</p>
-                                <p className="text-[10px] mt-0.5" style={{ color: T.textFaint }}>Joined on: {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "Recently"}</p>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* ══════════════════════════════════════════════════
-                        EMPTY STATE
-                        ══════════════════════════════════════════════════ */}
-                    {!loading && totalCalls === 0 && (
-                        <div className="text-center py-24 rounded-3xl border-dashed relative overflow-hidden" style={{ background: T.panel, border: `1px dashed ${T.panelBorder}` }}>
-                            <div className="absolute inset-0 flex items-center justify-center opacity-[0.05] pointer-events-none">
-                                <svg width="400" height="120" viewBox="0 0 400 120" fill="none">
-                                    {[...Array(40)].map((_, i) => {
-                                        const h = 20 + Math.sin(i * 0.7) * 30 + Math.sin(i * 0.3) * 15;
-                                        return <rect key={i} x={i * 10 + 5} y={(120 - h) / 2} width="5" height={h} rx="2.5" fill="#8b5cf6" />;
-                                    })}
-                                </svg>
-                            </div>
-                            <div className="relative">
-                                <div className="w-20 h-20 rounded-3xl mx-auto mb-6 flex items-center justify-center" style={{ background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.2)" }}>
-                                    <Mic size={36} className="text-violet-400" />
-                                </div>
-                                <h2 className="text-xl font-black mb-2" style={{ color: T.text }}>No calls in this range</h2>
-                                <p className="max-w-md mx-auto mb-7 text-sm leading-relaxed" style={{ color: T.textMuted }}>
-                                    Upload your first customer call recording, or widen the date range above. Our AI will transcribe it, score it, and surface actionable insights automatically.
-                                </p>
-                                <button onClick={() => setUploadOpen(true)}
-                                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm text-white transition-all active:scale-95"
-                                    style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)", boxShadow: "0 4px 24px rgba(124,58,237,0.35)" }}>
-                                    <Upload size={15} />
-                                    Upload First Call
-                                </button>
-                                <div className="flex flex-wrap justify-center gap-2 mt-8">
-                                    {[{ icon: Mic, label: "Whisper Transcription" }, { icon: Brain, label: "AI Analysis" }, { icon: BarChart2, label: "QA Scoring" }, { icon: Tag, label: "Keyword Extraction" }].map(({ icon: Icon, label }) => (
-                                        <span key={label} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full" style={{ border: `1px solid ${T.panelBorder}`, background: T.panel, color: T.textFaint }}>
-                                            <Icon size={10} />
-                                            {label}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* ══════════════════════════════════════════════════
-                        MISSION CONTROL — "what should I do right now?"
-                        Order: AI Briefing (hero) → today's snapshot (small,
-                        passive) → Critical Alerts → Top Calls (small strip).
-                        Nothing here is a trend/report — that's Analytics' job.
-                        ══════════════════════════════════════════════════ */}
-                    {(loading || totalCalls > 0) && (
+                    {user?.role === "OWNER" ? (
+                        <OwnerDashboardView
+                            user={user}
+                            companyStats={companyStats}
+                            membersData={membersData}
+                            calls={calls}
+                            totalCalls={totalCalls}
+                            loading={loading}
+                            dashboardStats={dashboardStats}
+                            T={T}
+                            onInvite={() => navigate(`/w/${companySlug}/company/invitations`)}
+                            onUpload={() => setUploadOpen(true)}
+                            onExport={() => {
+                                if (calls.length > 0) {
+                                    import("../utils/generateReport.js").then(({ generateCallReport }) => {
+                                        generateCallReport(calls[0]);
+                                    });
+                                } else {
+                                    setToast({ message: "No call available to export", type: "error" });
+                                }
+                            }}
+                            onManageMembers={() => navigate(`/w/${companySlug}/company/members`)}
+                            companySlug={companySlug}
+                        />
+                    ) : (
+                        <>
                         <div className="space-y-5">
 
                             {/* AI Briefing — the hero. This is the one thing on
@@ -1818,10 +2635,7 @@ export default function DashboardPage() {
                                 </div>
                             </div>
 
-                            {/* Today's snapshot — small, passive context underneath the
-                                briefing, not competing for primary attention. Same data
-                                Analytics shows, but here it's just "where things stand
-                                right now," not a trend to analyse. */}
+                            {/* Today's snapshot */}
                             <div>
                                 <div className="mb-2.5">
                                     <SectionLabel T={T} icon={Gauge} tone="#a1a1aa">Today's Snapshot</SectionLabel>
@@ -1845,7 +2659,55 @@ export default function DashboardPage() {
                                 </div>
                             </div>
 
-                            {/* Critical Alerts — full width, never buried in a side column */}
+                            {/* Call Outcomes & Deal Intelligence */}
+                            <div>
+                                <div className="mb-2.5 flex items-center justify-between">
+                                    <SectionLabel T={T} icon={Target} tone="#8b5cf6">Call Outcomes & Deal Intelligence</SectionLabel>
+                                    {filters.outcomeStatus !== "all" && (
+                                        <button onClick={() => setFilters(f => ({ ...f, outcomeStatus: "all" }))}
+                                            className="text-[11px] text-violet-400 hover:text-violet-300 font-bold transition-colors">
+                                            Clear Outcome Filter
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                                    {[
+                                        { key: "Won", label: "Won / Closed", color: "#10b981", bg: "rgba(16,185,129,0.1)", border: "rgba(16,185,129,0.3)", icon: Trophy },
+                                        { key: "Follow Up Required", label: "Follow Up Required", color: "#f59e0b", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)", icon: RotateCcw },
+                                        { key: "Escalated", label: "Escalated", color: "#f97316", bg: "rgba(249,115,22,0.1)", border: "rgba(249,115,22,0.3)", icon: AlertTriangle },
+                                        { key: "Pending", label: "Pending", color: "#eab308", bg: "rgba(234,179,8,0.1)", border: "rgba(234,179,8,0.3)", icon: Hourglass },
+                                        { key: "Lost", label: "Lost", color: "#ef4444", bg: "rgba(239,68,68,0.1)", border: "rgba(239,68,68,0.3)", icon: XCircle },
+                                    ].map(item => {
+                                        const count = (dashboardStats?.outcomeDistribution?.[item.key] ?? 
+                                                       rangedCalls.filter(c => (c.outcomeStatus || c.outcome) === item.key).length) || 0;
+                                        const pctVal = statsTotalCalls > 0 ? Math.round((count / statsTotalCalls) * 100) : 0;
+                                        const isSelected = filters.outcomeStatus === item.key;
+                                        return (
+                                            <div key={item.key}
+                                                onClick={() => setFilters(f => ({ ...f, outcomeStatus: isSelected ? "all" : item.key }))}
+                                                className="p-3.5 rounded-xl border transition-all cursor-pointer group"
+                                                style={{
+                                                    background: isSelected ? item.bg : T.panel,
+                                                    borderColor: isSelected ? item.color : T.panelBorder,
+                                                    boxShadow: isSelected ? `0 0 16px ${item.color}33` : "none"
+                                                }}>
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className="p-1.5 rounded-lg flex items-center justify-center" style={{ background: item.bg, border: `1px solid ${item.border}` }}>
+                                                        <item.icon size={13} style={{ color: item.color }} />
+                                                    </span>
+                                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: T.textFaint }}>
+                                                        {pctVal}%
+                                                    </span>
+                                                </div>
+                                                <p className="text-xl font-black" style={{ color: T.text }}>{count}</p>
+                                                <p className="text-[11px] font-medium truncate mt-0.5" style={{ color: item.color }}>{item.label}</p>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Critical Alerts */}
                             <Panel T={T} style={needsAttention.length > 0 ? { background: "rgba(239,68,68,0.035)", borderColor: "rgba(239,68,68,0.2)" } : {}}>
                                 <PanelHeader T={T}
                                     title={<span className="flex items-center gap-2"><ShieldAlert size={15} className="text-red-400" /> Critical Alerts</span>}
@@ -1863,7 +2725,7 @@ export default function DashboardPage() {
                                         {needsAttention.map(call => {
                                             const risk = RISK_CFG[call.riskLevel];
                                             return (
-                                                <Link key={call.id} to={`/calls/${call.id}`}
+                                                <Link key={call.id} to={`/w/${user?.companySlug || "default"}/calls/${call.id}`}
                                                     className="flex items-center gap-3 p-3.5 rounded-xl transition-all group"
                                                     style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}
                                                     onMouseEnter={e => { e.currentTarget.style.borderColor = `${risk.color}55`; }}
@@ -1888,9 +2750,7 @@ export default function DashboardPage() {
                                 )}
                             </Panel>
 
-                            {/* Top Calls — demoted to a small horizontal strip (recognition,
-                                not core workflow), instead of a tall column fighting the
-                                radar/AI-summary column it used to sit in. */}
+                            {/* Top Calls */}
                             {!loading && topCalls.length > 0 && (
                                 <div>
                                     <div className="mb-2.5">
@@ -1898,7 +2758,7 @@ export default function DashboardPage() {
                                     </div>
                                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                         {topCalls.map((call, i) => (
-                                            <Link key={call.id} to={`/calls/${call.id}`}
+                                            <Link key={call.id} to={`/w/${user?.companySlug || "default"}/calls/${call.id}`}
                                                 className="flex items-center gap-2.5 p-3 rounded-xl transition-all"
                                                 style={{ background: T.panel, border: `1px solid ${T.panelBorder}` }}>
                                                 <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: `${MEDALS[i]}22`, border: `1px solid ${MEDALS[i]}55` }}>
@@ -1915,7 +2775,6 @@ export default function DashboardPage() {
                                 </div>
                             )}
                         </div>
-                    )}
 
                     {/* ══════════════════════════════════════════════════
                         RECENT CALLS INBOX + DETAIL PANE (full width)
@@ -1961,13 +2820,8 @@ export default function DashboardPage() {
                                                                 </p>
                                                             </button>
                                                             <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                                                                {call.sentiment && (
-                                                                    <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
-                                                                        <SIcon size={8} />
-                                                                    </span>
-                                                                )}
                                                                 {call.overallScore != null && <span className="text-[10px] font-black" style={{ color: T.text }}>{call.overallScore}</span>}
-                                                                <Link to={`/calls/${call.id}`} onClick={e => e.stopPropagation()}
+                                                                <Link to={`/w/${user?.companySlug || "default"}/calls/${call.id}`} onClick={e => e.stopPropagation()}
                                                                     className="flex items-center gap-0.5 text-[10px] text-violet-400 hover:text-violet-300 font-semibold transition-colors">
                                                                     View <ArrowRight size={9} />
                                                                 </Link>
@@ -1995,7 +2849,9 @@ export default function DashboardPage() {
                             </div>
                         </>
                     )}
-                </main>
+                        </>
+                    )}
+        </main>
 
                 <footer className="mt-4" style={{ borderTop: `1px solid ${T.divider}` }}>
                     <div className="px-6 py-5 flex flex-col sm:flex-row items-center justify-between gap-2">

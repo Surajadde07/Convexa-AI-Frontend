@@ -158,10 +158,9 @@ export default function WorkspaceMembers() {
     const canManage = (target) => {
         if (!actor) return false;
         if (target.id === actor.id) return false; // Self-manage role/removal blocked
-        if (target.role === "OWNER") return false; // OWNER is untouchable
 
         const actorRole = actor.role;
-        if (actorRole === "OWNER") return true; // OWNER manages everyone else
+        if (actorRole === "OWNER") return true; // OWNER manages everyone else (including other OWNERs)
         if (actorRole === "ADMIN") {
             // ADMIN manages USER and MANAGER only
             return target.role === "USER" || target.role === "MANAGER";

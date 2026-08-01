@@ -644,7 +644,7 @@ export default function EmployeePerformancePage() {
                                     <tbody>
                                         {profile.recentCalls.map(c => (
                                             <tr key={c.id}
-                                                onClick={() => navigate(`/calls/${c.id}`)}
+                                                onClick={() => navigate(`/w/${user?.companySlug || "default"}/calls/${c.id}`)}
                                                 className="cursor-pointer transition-colors"
                                                 style={{ borderTop: `1px solid ${T.divider}` }}
                                                 onMouseEnter={e => { e.currentTarget.style.background = T.panelHover; }}

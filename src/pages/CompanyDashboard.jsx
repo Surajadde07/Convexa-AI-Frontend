@@ -300,7 +300,7 @@ export default function CompanyDashboard() {
                                                 <tbody>
                                                     {filteredTopPerformers.map(p => (
                                                         <tr key={p.employeeId}
-                                                            onClick={() => navigate(`/company/employee/${p.employeeId}`)}
+                                                            onClick={() => navigate(`/w/${user?.companySlug || "default"}/company/employee/${p.employeeId}`)}
                                                             className="cursor-pointer transition-colors"
                                                             style={{ borderTop: `1px solid ${T.divider}` }}
                                                             onMouseEnter={e => { e.currentTarget.style.background = T.panelHover; }}
@@ -344,7 +344,7 @@ export default function CompanyDashboard() {
                                                 <tbody>
                                                     {filteredNeedsCoaching.map(p => (
                                                         <tr key={p.employeeId}
-                                                            onClick={() => navigate(`/company/employee/${p.employeeId}`)}
+                                                            onClick={() => navigate(`/w/${user?.companySlug || "default"}/company/employee/${p.employeeId}`)}
                                                             className="cursor-pointer transition-colors"
                                                             style={{ borderTop: `1px solid ${T.divider}` }}
                                                             onMouseEnter={e => { e.currentTarget.style.background = T.panelHover; }}

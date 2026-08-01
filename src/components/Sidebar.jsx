@@ -1,11 +1,12 @@
 import { Link } from "react-router-dom";
-import { useRef, useLayoutEffect } from "react";
+import { useState, useRef, useLayoutEffect } from "react";
+import { useWorkspace } from "../context/WorkspaceContext";
 import logo from "../assets/CONVEXA_AI_logo.png";
 import {
     LayoutDashboard, History, LineChart, BookOpen, Brain,
     ClipboardList, FileText, Key, Settings, Sparkles,
     ArrowRight, ChevronsLeft, ChevronsRight, LogOut, Lock, Building2,
-    SlidersHorizontal, Users,
+    SlidersHorizontal, Users, ChevronDown, DollarSign, Trophy, Mic, CreditCard,
 } from "lucide-react";
 
 /* ────────────────────────────────────────────────────────────────────── */
@@ -44,42 +45,29 @@ export const THEMES = {
 
 /**
  * Sidebar — the app's primary left navigation.
- *
- * Nav is now split by real product maturity, not by build order:
- *   REAL_ITEMS  — fully shipped pages, live routes, real backend data.
- *   SOON_ITEMS  — Reports & Keywords, which need backend work (scheduled
- *                 export pipelines / keyword-spotting engine respectively)
- *                 that hasn't been built yet. Shown as premium locked rows
- *                 rather than dead links.
  */
 export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, currentPath, needsAttentionCount, totalCalls }) {
+    const { workspaces, currentWorkspace, switchWorkspace } = useWorkspace();
+    const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
     const isManagerOrAdmin = user?.role === "OWNER" || user?.role === "MANAGER" || user?.role === "ADMIN";
     const navRef = useRef(null);
 
-    // Issue 8 fix — real root cause:
-    // Each page renders its own <Sidebar> instance, so React unmounts and remounts the
-    // component on every navigation. The DOM scrollTop resets to 0 on mount.
-    // Fix: persist the scroll position in sessionStorage (survives remount, cleared on tab close)
-    // and restore it synchronously via useLayoutEffect before the browser paints.
     useLayoutEffect(() => {
         const nav = navRef.current;
         if (!nav) return;
         const saved = parseInt(sessionStorage.getItem("sidebar_scroll") || "0", 10);
         if (saved > 0) {
-            // Use requestAnimationFrame to restore after browser layout is complete
             requestAnimationFrame(() => {
                 if (navRef.current) navRef.current.scrollTop = saved;
             });
         }
         return () => {
-            // Persist scroll position on unmount so next Sidebar mount can restore it
             if (navRef.current) {
                 sessionStorage.setItem("sidebar_scroll", String(navRef.current.scrollTop));
             }
         };
     }, []);
 
-    // Trial calculations
     const getTrialInfo = (trialEndsAt) => {
         if (!trialEndsAt) return { daysLeft: 0, formattedDate: "" };
         try {
@@ -106,25 +94,91 @@ export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, curren
     const trialInfo = getTrialInfo(user?.trialEndsAt);
     const isLogoInvalid = !user?.companyLogo || user.companyLogo.trim() === "" || user.companyLogo.includes("placeholder.com") || user.companyLogo.includes("via.placeholder.com");
 
+    const isOwner = user?.role === "OWNER";
+    const companySlug = user?.companySlug || "default";
+
+    const OWNER_NAV_GROUPS = [
+        {
+            title: "EXECUTIVE",
+            items: [
+                { label: "Executive Command Center", path: `/w/${companySlug}/dashboard`, activePath: "/dashboard", Icon: LayoutDashboard },
+                { label: "Revenue Intelligence", path: `/w/${companySlug}/revenue-intelligence`, activePath: "/revenue-intelligence", Icon: DollarSign },
+                { label: "AI Insights", path: `/w/${companySlug}/insights`, activePath: "/insights", Icon: Brain },
+                { label: "Performance Center", path: `/w/${companySlug}/analytics`, activePath: "/analytics", Icon: Trophy },
+            ]
+        },
+        {
+            title: "OPERATIONS",
+            items: [
+                { label: "Conversation Library", path: `/w/${companySlug}/history`, activePath: "/history", Icon: Mic },
+                { label: "Executive Reports", path: `/w/${companySlug}/reports`, activePath: "/reports", Icon: FileText },
+            ]
+        },
+        {
+            title: "WORKSPACE",
+            items: [
+                { label: "Members", path: `/w/${companySlug}/company/members`, activePath: "/company/members", Icon: Users },
+            ]
+        },
+        {
+            title: "ADMINISTRATION",
+            items: [
+                { label: "Billing & Seats", path: `/w/${companySlug}/company/billing`, activePath: "/company/billing", Icon: CreditCard },
+                { label: "Workspace Settings", path: `/w/${companySlug}/company/settings`, activePath: "/company/settings", Icon: SlidersHorizontal },
+            ]
+        }
+    ];
+
     const REAL_ITEMS = [
-        { label: "Dashboard", path: "/dashboard", Icon: LayoutDashboard },
-        { label: "Call History", path: "/history", Icon: History },
-        { label: "Analytics", path: "/analytics", Icon: LineChart },
-        { label: "Library", path: "/library", Icon: BookOpen },
-        { label: "AI Insights", path: "/insights", Icon: Brain },
-        { label: "Scorecards", path: "/scorecards", Icon: ClipboardList },
+        { label: "Dashboard", path: `/w/${companySlug}/dashboard`, activePath: "/dashboard", Icon: LayoutDashboard },
+        { label: "Call History", path: `/w/${companySlug}/history`, activePath: "/history", Icon: History },
+        { label: "Analytics", path: `/w/${companySlug}/analytics`, activePath: "/analytics", Icon: LineChart },
+        { label: "Library", path: `/w/${companySlug}/library`, activePath: "/library", Icon: BookOpen },
+        { label: "AI Insights", path: `/w/${companySlug}/insights`, activePath: "/insights", Icon: Brain },
+        { label: "Scorecards", path: `/w/${companySlug}/scorecards`, activePath: "/scorecards", Icon: ClipboardList },
         ...(isManagerOrAdmin ? [
-            { label: "Company", path: "/company", Icon: Building2 },
-            { label: "Members", path: "/company/members", Icon: Users },
-            { label: "Company Settings", path: "/company/settings", Icon: SlidersHorizontal },
-            { label: "Invitations", path: "/company/invitations", Icon: ClipboardList }
+            { label: "Company", path: `/w/${companySlug}/company`, activePath: "/company", Icon: Building2 },
+            { label: "Members", path: `/w/${companySlug}/company/members`, activePath: "/company/members", Icon: Users },
+            { label: "Company Settings", path: `/w/${companySlug}/company/settings`, activePath: "/company/settings", Icon: SlidersHorizontal },
+            { label: "Invitations", path: `/w/${companySlug}/company/invitations`, activePath: "/company/invitations", Icon: ClipboardList }
         ] : []),
-        { label: "Settings", path: "/settings", Icon: Settings },
+        { label: "Settings", path: `/w/${companySlug}/settings`, activePath: "/settings", Icon: Settings },
     ];
     const SOON_ITEMS = [
         { label: "Reports", Icon: FileText },
         { label: "Keywords", Icon: Key },
     ];
+
+    const renderNavItem = ({ label, path, activePath, Icon }) => {
+        const normCurrent = (currentPath || "").replace(/\/+$/, "");
+        const normPath = path.replace(/\/+$/, "");
+        const normActive = activePath.replace(/\/+$/, "");
+
+        const match = normCurrent.match(/^\/w\/[^/]+(\/.*)?$/);
+        const currentSubPath = match ? (match[1] || "/dashboard") : normCurrent;
+
+        const active = normCurrent === normPath || normCurrent === normActive || currentSubPath === normActive;
+        return (
+            <Link key={label} to={path} title={collapsed ? label : undefined}
+                className={`relative flex items-center gap-3 rounded-xl text-sm font-semibold transition-all duration-200 group ${collapsed ? "justify-center px-0 py-3" : "px-3.5 py-2.5"}`}
+                style={active
+                    ? { background: "rgba(139,92,246,0.14)", color: "#c4b5fd", boxShadow: "inset 0 0 0 1px rgba(139,92,246,0.35), 0 0 20px rgba(139,92,246,0.12)" }
+                    : { color: T.textMuted }}
+                onMouseEnter={e => { if (!active) { e.currentTarget.style.background = T.panelHover; e.currentTarget.style.color = T.text; } }}
+                onMouseLeave={e => { if (!active) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.textMuted; } }}>
+                {active && !collapsed && (
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-r-full" style={{ background: "#8b5cf6" }} />
+                )}
+                <Icon size={17} strokeWidth={2} className="flex-shrink-0" />
+                {!collapsed && <span className="truncate">{label}</span>}
+                {!collapsed && (label === "Dashboard" || label === "Executive Dashboard") && needsAttentionCount > 0 && (
+                    <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "rgba(239,68,68,0.18)", color: "#f87171" }}>
+                        {needsAttentionCount}
+                    </span>
+                )}
+            </Link>
+        );
+    };
 
     return (
         <aside className={`hidden md:flex flex-col flex-shrink-0 h-screen sticky top-0 transition-all duration-300 z-40 ${collapsed ? "w-[76px]" : "w-64"}`}
@@ -133,23 +187,76 @@ export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, curren
             <div className={`h-16 flex items-center flex-shrink-0 ${collapsed ? "justify-center px-0" : "justify-between px-5"}`}
                 style={{ borderBottom: `1px solid ${T.divider}` }}>
                 {!collapsed && (
-                    <div className="flex items-center gap-2.5 min-w-0 w-full">
-                        {isLogoInvalid ? (
-                            <div className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-white flex-shrink-0"
-                                style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)", boxShadow: "0 2px 8px rgba(139,92,246,0.2)" }}>
-                                <span className="text-xs">{user?.companyName ? user.companyName[0].toUpperCase() : "C"}</span>
+                    <div className="relative w-full">
+                        <button 
+                            onClick={() => setWsDropdownOpen(!wsDropdownOpen)}
+                            className="flex items-center justify-between w-full p-2 rounded-xl transition-all duration-200 text-left hover:bg-[rgba(255,255,255,0.05)]"
+                            style={{ color: T.text }}
+                        >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                                {isLogoInvalid ? (
+                                    <div className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-white flex-shrink-0"
+                                        style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)", boxShadow: "0 2px 8px rgba(139,92,246,0.2)" }}>
+                                        <span className="text-xs">{user?.companyName ? user.companyName[0].toUpperCase() : "C"}</span>
+                                    </div>
+                                ) : (
+                                    <img src={user.companyLogo} alt="Workspace Logo" className="h-8 w-8 rounded-lg object-contain flex-shrink-0" />
+                                )}
+                                <div className="min-w-0">
+                                    <p className="text-sm font-black tracking-tight truncate" style={{ color: T.text }}>
+                                        {user?.companyName || "Convexa AI"}
+                                    </p>
+                                    <p className="text-[10px] truncate" style={{ color: T.textFaint }}>
+                                        {user?.companyName ? `${user.role || "Member"}` : "Conversation Intelligence"}
+                                    </p>
+                                </div>
                             </div>
-                        ) : (
-                            <img src={user.companyLogo} alt="Workspace Logo" className="h-8 w-8 rounded-lg object-contain flex-shrink-0" />
+                            <ChevronDown size={16} className={`flex-shrink-0 transition-transform duration-200 ${wsDropdownOpen ? "rotate-180" : ""}`} style={{ color: T.textMuted }} />
+                        </button>
+
+                        {/* Dropdown Menu */}
+                        {wsDropdownOpen && (
+                            <div className="absolute left-0 right-0 mt-2 p-1.5 rounded-2xl border backdrop-blur-xl shadow-2xl z-50 animate-fade-in"
+                                style={{ 
+                                    background: T.sidebarBg, 
+                                    borderColor: T.divider,
+                                    boxShadow: "0 20px 40px rgba(0,0,0,0.5)"
+                                }}
+                            >
+                                <p className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-500">Switch Workspace</p>
+                                <div className="max-h-60 overflow-y-auto space-y-0.5">
+                                    {workspaces.map((ws) => {
+                                        const isActive = currentWorkspace?.company?.id === ws.id;
+                                        const isWsLogoInvalid = !ws.logoUrl || ws.logoUrl.trim() === "" || ws.logoUrl.includes("placeholder.com") || ws.logoUrl.includes("via.placeholder.com");
+                                        return (
+                                            <button
+                                                key={ws.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    setWsDropdownOpen(false);
+                                                    switchWorkspace(ws.slug);
+                                                }}
+                                                className="w-full flex items-center gap-2.5 p-2 rounded-xl transition-all duration-200 text-left hover:bg-[rgba(255,255,255,0.05)]"
+                                                style={isActive ? { background: "rgba(139,92,246,0.1)", color: "#c4b5fd" } : { color: T.textMuted }}
+                                            >
+                                                {isWsLogoInvalid ? (
+                                                    <div className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-white flex-shrink-0 text-xs"
+                                                        style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)" }}>
+                                                        {ws.name ? ws.name[0].toUpperCase() : "C"}
+                                                    </div>
+                                                ) : (
+                                                    <img src={ws.logoUrl} alt="Workspace Logo" className="h-7 w-7 rounded-lg object-contain flex-shrink-0" />
+                                                )}
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="text-xs font-semibold truncate">{ws.name}</p>
+                                                </div>
+                                                {isActive && <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
                         )}
-                        <div className="min-w-0">
-                            <p className="text-sm font-black tracking-tight truncate" style={{ color: T.text }}>
-                                {user?.companyName || "Convexa AI"}
-                            </p>
-                            <p className="text-[10px] truncate" style={{ color: T.textFaint }}>
-                                {user?.companyName ? `${user.department || "General"} Workspace` : "Conversation Intelligence"}
-                            </p>
-                        </div>
                     </div>
                 )}
                 {collapsed && (
@@ -165,34 +272,23 @@ export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, curren
             </div>
 
             <nav ref={navRef} className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
-                {REAL_ITEMS.map(({ label, path, Icon }) => {
-                    const active = currentPath === path;
-                    return (
-                        <Link key={label} to={path} title={collapsed ? label : undefined}
-                            className={`relative flex items-center gap-3 rounded-xl text-sm font-semibold transition-all duration-200 group ${collapsed ? "justify-center px-0 py-3" : "px-3.5 py-2.5"}`}
-                            style={active
-                                ? { background: "rgba(139,92,246,0.14)", color: "#c4b5fd", boxShadow: "inset 0 0 0 1px rgba(139,92,246,0.35), 0 0 20px rgba(139,92,246,0.12)" }
-                                : { color: T.textMuted }}
-                            onMouseEnter={e => { if (!active) { e.currentTarget.style.background = T.panelHover; e.currentTarget.style.color = T.text; } }}
-                            onMouseLeave={e => { if (!active) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.textMuted; } }}>
-                            {active && !collapsed && (
-                                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-r-full" style={{ background: "#8b5cf6" }} />
+                {isOwner ? (
+                    OWNER_NAV_GROUPS.map((group, idx) => (
+                        <div key={group.title} className={idx > 0 ? "pt-3" : ""}>
+                            {!collapsed && (
+                                <p className="px-3.5 pb-1 text-[10px] font-bold uppercase tracking-widest text-violet-400 opacity-90">{group.title}</p>
                             )}
-                            <Icon size={17} strokeWidth={2} className="flex-shrink-0" />
-                            {!collapsed && <span className="truncate">{label}</span>}
-                            {!collapsed && label === "Dashboard" && needsAttentionCount > 0 && (
-                                <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "rgba(239,68,68,0.18)", color: "#f87171" }}>
-                                    {needsAttentionCount}
-                                </span>
-                            )}
-                        </Link>
-                    );
-                })}
+                            {group.items.map(renderNavItem)}
+                        </div>
+                    ))
+                ) : (
+                    REAL_ITEMS.map(renderNavItem)
+                )}
 
-                {!collapsed && (
+                {!isOwner && !collapsed && (
                     <p className="px-3.5 pt-5 pb-1.5 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textFaint }}>Coming soon</p>
                 )}
-                {SOON_ITEMS.map(({ label, Icon }) => (
+                {!isOwner && SOON_ITEMS.map(({ label, Icon }) => (
                     <div key={label} title={collapsed ? `${label} — coming soon` : undefined}
                         className={`relative flex items-center gap-3 rounded-xl text-sm font-medium cursor-not-allowed transition-colors group ${collapsed ? "justify-center px-0 py-3" : "px-3.5 py-2.5"}`}
                         style={{ color: T.textFaint }}>

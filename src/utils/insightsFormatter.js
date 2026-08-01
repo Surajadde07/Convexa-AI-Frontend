@@ -14,11 +14,11 @@
  */
 
 const INSIGHT_SECTIONS = [
-    { key: "customerIntent",   labels: ["Customer Intent"],    emoji: "🎯", color: "#8b5cf6", border: "rgba(139,92,246,0.25)", bg: "rgba(139,92,246,0.08)" },
-    { key: "mainIssue",        labels: ["Main Issue"],         emoji: "🔍", color: "#3b82f6", border: "rgba(59,130,246,0.25)",  bg: "rgba(59,130,246,0.08)"  },
-    { key: "customerConcern",  labels: ["Customer Concern"],   emoji: "⚠️", color: "#f59e0b", border: "rgba(245,158,11,0.25)", bg: "rgba(245,158,11,0.08)" },
-    { key: "outcome",          labels: ["Outcome"],            emoji: "✅", color: "#10b981", border: "rgba(16,185,129,0.25)", bg: "rgba(16,185,129,0.08)" },
-    { key: "agentPerformance", labels: ["Agent Performance"],  emoji: "👤", color: "#ec4899", border: "rgba(236,72,153,0.25)",  bg: "rgba(236,72,153,0.08)"  },
+    { key: "customerIntent",   labels: ["Customer Intent"],                     emoji: "🎯", color: "#8b5cf6", border: "rgba(139,92,246,0.25)", bg: "rgba(139,92,246,0.08)" },
+    { key: "mainIssue",        labels: ["Main Issue"],                          emoji: "🔍", color: "#3b82f6", border: "rgba(59,130,246,0.25)",  bg: "rgba(59,130,246,0.08)"  },
+    { key: "customerConcern",  labels: ["Customer Concern"],                    emoji: "⚠️", color: "#f59e0b", border: "rgba(245,158,11,0.25)", bg: "rgba(245,158,11,0.08)" },
+    { key: "outcome",          labels: ["Outcome", "Next Step", "Closing Technique"], emoji: "✅", color: "#10b981", border: "rgba(16,185,129,0.25)", bg: "rgba(16,185,129,0.08)" },
+    { key: "agentPerformance", labels: ["Agent Performance"],                   emoji: "👤", color: "#ec4899", border: "rgba(236,72,153,0.25)",  bg: "rgba(236,72,153,0.08)"  },
 ];
 
 /**
@@ -53,8 +53,14 @@ function cleanValue(str) {
  * Format C (Markdown headings):
  *   ## Customer Intent\nThe customer…\n## Main Issue\n…
  */
-export function parseInsights(text) {
-    if (!text) return INSIGHT_SECTIONS.map(s => ({ ...s, label: s.labels[0], value: null }));
+export function parseInsights(text, call = null) {
+    if (!text) return INSIGHT_SECTIONS.map(s => {
+        let val = null;
+        if (s.key === "outcome" && call) {
+            val = call.outcomeStatus || call.outcome || null;
+        }
+        return { ...s, label: s.labels[0], value: val };
+    });
 
     // Build a single regex that matches any known label (case-insensitive)
     // followed by an optional colon/newline, capturing the value up to the
@@ -102,11 +108,17 @@ export function parseInsights(text) {
         }];
     }
 
-    return INSIGHT_SECTIONS.map(s => ({
-        ...s,
-        label: s.labels[0],
-        value: found[s.key] || null,
-    }));
+    return INSIGHT_SECTIONS.map(s => {
+        let val = found[s.key] || null;
+        if (s.key === "outcome" && !val && call) {
+            val = call.outcomeStatus || call.outcome || null;
+        }
+        return {
+            ...s,
+            label: s.labels[0],
+            value: val,
+        };
+    });
 }
 
 export { INSIGHT_SECTIONS };

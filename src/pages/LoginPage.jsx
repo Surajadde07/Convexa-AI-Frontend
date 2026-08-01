@@ -347,12 +347,12 @@ function LoginForm() {
       // Company-First (Model A): if the user has no workspace, redirect to the
       // dedicated no-workspace page instead of the dashboard.
       if (res.data.noWorkspace) {
-        setTimeout(() => navigate("/no-workspace", { replace: true }), 600);
+        setTimeout(() => navigate("/no-workspace", { replace: true }), 400);
         return;
       }
 
       const target = await resolveRedirectTarget();
-      setTimeout(() => navigate(target, { replace: true }), 800);
+      setTimeout(() => navigate(target, { replace: true }), 400);
     } catch (err) {
       const msg = err.response?.data?.message
         || err.response?.data?.error

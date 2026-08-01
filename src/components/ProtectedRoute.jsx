@@ -47,6 +47,7 @@ import { useEffect } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { isAuthenticated, clearSession, getUser } from "../services/api";
 import { googleSignOut } from "../services/googleAuth";
+import { useWorkspace } from "../context/WorkspaceContext";
 
 // ─── Exported logout helper — import this in every Sign Out button ────────────
 export function logoutAndRedirect() {
@@ -78,6 +79,7 @@ export function logoutAndRedirect() {
 //   <ProtectedRoute roles={["MANAGER", "ADMIN"]}><CompanyDashboard /></ProtectedRoute>
 export default function ProtectedRoute({ children, roles }) {
     const location = useLocation();
+    const { workspaces, currentWorkspace, loading, initialized } = useWorkspace();
 
     // ── Layer 3: pageshow catches bfcache restores ────────────────────────────
     useEffect(() => {
@@ -111,27 +113,59 @@ export default function ProtectedRoute({ children, roles }) {
         };
     }, []);
 
-    // ── Layer 2: synchronous render check ────────────────────────────────────
+    // ── Layer 2: synchronous auth check ────────────────────────────────────
     if (!isAuthenticated()) {
-        // `replace` removes the protected URL from the history stack
         return <Navigate to="/" replace state={{ from: location }} />;
     }
 
-    // ── Company-First (Model A): workspace access gate ────────────────────────
-    // If the user authenticated but has no workspace (removed from their company),
-    // block all protected pages and show the dedicated No Workspace page.
-    // This prevents workspace-less accounts from accessing dashboards or APIs.
     if (getUser()?.noWorkspace) {
         return <Navigate to="/no-workspace" replace />;
     }
 
-    // Role gate — only applies when the route opts in via the `roles` prop.
-    // A USER manually typing a manager/admin URL lands back on /dashboard
-    // rather than seeing a blank page or a raw 403 from the API.
+    // Workspace loading state: Wait until WorkspaceContext has initialized
+    if (loading || !initialized) {
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center bg-[#05060A]">
+                <div className="space-y-4 text-center">
+                    <div className="w-16 h-16 border-4 border-violet-500/30 border-t-violet-500 rounded-full animate-spin mx-auto" />
+                    <p className="text-sm font-semibold text-slate-400">Loading workspace context…</p>
+                </div>
+            </div>
+        );
+    }
+
+    // If workspaces list is empty, redirect to /no-workspace
+    if (workspaces.length === 0) {
+        return <Navigate to="/no-workspace" replace />;
+    }
+
+    // Redirect flat routes to workspace-scoped routes
+    const match = location.pathname.match(/^\/w\/([^/]+)/);
+    if (!match) {
+        const activeSlug = currentWorkspace?.company?.slug || workspaces[0]?.slug;
+        const subPath = (location.pathname === "/" || location.pathname === "") ? "/dashboard" : location.pathname;
+        return <Navigate to={`/w/${activeSlug}${subPath}`} replace />;
+    }
+
+    const urlSlug = match[1];
+    // Guard against workspace mismatch: Wait for WorkspaceContext to finish switching workspace context
+    if (workspaces.some(w => w.slug === urlSlug) && currentWorkspace?.company?.slug !== urlSlug) {
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center bg-[#05060A]">
+                <div className="space-y-4 text-center">
+                    <div className="w-16 h-16 border-4 border-violet-500/30 border-t-violet-500 rounded-full animate-spin mx-auto" />
+                    <p className="text-sm font-semibold text-slate-400">Loading workspace context…</p>
+                </div>
+            </div>
+        );
+    }
+
+    // Role check resolved from currentWorkspace context
     if (roles && roles.length > 0) {
-        const currentRole = getUser()?.role;
+        const currentRole = currentWorkspace?.role;
         if (!roles.includes(currentRole)) {
-            return <Navigate to="/dashboard" replace />;
+            const activeSlug = currentWorkspace?.company?.slug || workspaces[0]?.slug;
+            return <Navigate to={`/w/${activeSlug}/dashboard`} replace />;
         }
     }
 

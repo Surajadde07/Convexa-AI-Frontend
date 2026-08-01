@@ -447,7 +447,7 @@ export default function AnalyticsPage() {
                                                 <p className="px-4 py-6 text-xs text-slate-600 text-center">No matches for "{searchQuery}"</p>
                                             ) : (
                                                 searchResults.map(call => (
-                                                    <Link key={call.id} to={`/calls/${call.id}`}
+                                                    <Link key={call.id} to={`/w/${getUser()?.companySlug || "default"}/calls/${call.id}`}
                                                         onClick={() => setSearchOpen(false)}
                                                         className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/5">
                                                         <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "rgba(139,92,246,0.15)" }}>

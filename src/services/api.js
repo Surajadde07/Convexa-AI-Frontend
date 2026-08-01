@@ -2,6 +2,14 @@ import axios from "axios";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
+let activeWorkspaceId = null;
+
+export const setActiveWorkspaceId = (id) => {
+  activeWorkspaceId = id;
+};
+
+export const getActiveWorkspaceId = () => activeWorkspaceId;
+
 const api = axios.create({
   baseURL: BASE_URL,
   headers: { "Content-Type": "application/json" },
@@ -13,6 +21,10 @@ api.interceptors.request.use(
     const token = localStorage.getItem("convexa_token");
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+    const wsId = getActiveWorkspaceId();
+    if (wsId) {
+      config.headers["X-Workspace-Id"] = wsId;
     }
     return config;
   },
@@ -30,11 +42,7 @@ api.interceptors.response.use(
     if (status === 401 && !isAuthEndpoint) {
       localStorage.removeItem("convexa_token");
       localStorage.removeItem("convexa_user");
-
-      const authPaths = ["/", "/login", "/register"];
-      if (!authPaths.includes(window.location.pathname)) {
-        window.location.replace("/");
-      }
+      activeWorkspaceId = null;
     }
 
     return Promise.reject(error);
@@ -45,9 +53,7 @@ api.interceptors.response.use(
 /**
  * Persists the JWT and user object returned by the backend.
  *
- * AuthResponse.java returns flat fields (id, name, email, role, token).
- * This single write handles both flat (current backend) and nested
- * (.user key) response shapes.
+ * AuthResponse.java returns flat fields (id, name, email, token).
  */
 export const storeSession = (authResponse) => {
   if (authResponse.token) {
@@ -55,27 +61,19 @@ export const storeSession = (authResponse) => {
   }
 
   const user = authResponse.user ?? {
-    id:    authResponse.id,
-    name:  authResponse.name,
-    email: authResponse.email,
-    role:  authResponse.role,
-    companyName: authResponse.companyName,
-    companySlug: authResponse.companySlug,
-    companyLogo: authResponse.companyLogo,
-    department: authResponse.department,
-    managerName: authResponse.managerName,
-    subscriptionPlan: authResponse.subscriptionPlan,
-    subscriptionStatus: authResponse.subscriptionStatus,
-    seatLimit: authResponse.seatLimit,
-    currentSeatCount: authResponse.currentSeatCount,
-    trialEndsAt: authResponse.trialEndsAt,
-    onboardingCompleted: authResponse.onboardingCompleted,
-    profileCompletionPercentage: authResponse.profileCompletionPercentage,
-    brandPrimaryColor: authResponse.brandPrimaryColor,
-    brandSecondaryColor: authResponse.brandSecondaryColor,
-    // noWorkspace: true means the user authenticated but has no company.
-    // Frontend should redirect to /no-workspace instead of the dashboard.
-    noWorkspace: authResponse.noWorkspace ?? false,
+    id:                   authResponse.id,
+    name:                 authResponse.name,
+    email:                authResponse.email,
+    role:                 authResponse.role,
+    companyName:          authResponse.companyName,
+    companySlug:          authResponse.companySlug,
+    companyLogo:          authResponse.companyLogo,
+    department:           authResponse.department,
+    subscriptionPlan:     authResponse.subscriptionPlan,
+    subscriptionStatus:   authResponse.subscriptionStatus,
+    seatLimit:            authResponse.seatLimit,
+    currentSeatCount:     authResponse.currentSeatCount,
+    noWorkspace:          authResponse.noWorkspace ?? false,
   };
   localStorage.setItem("convexa_user", JSON.stringify(user));
 };
@@ -83,6 +81,7 @@ export const storeSession = (authResponse) => {
 export const clearSession = () => {
   localStorage.removeItem("convexa_token");
   localStorage.removeItem("convexa_user");
+  activeWorkspaceId = null;
 };
 
 export const getToken = () => localStorage.getItem("convexa_token");
@@ -100,8 +99,6 @@ export const isAuthenticated = () => Boolean(getToken());
 
 /**
  * Updates the cached user session's seat count fields by calling sync-seats.
- * Call this after adding/removing members so the Sidebar refreshes without a
- * full page reload. Only updates seatCount fields — does NOT replace the JWT.
  */
 export const refreshSeatCount = async (apiInstance) => {
   try {
@@ -115,7 +112,6 @@ export const refreshSeatCount = async (apiInstance) => {
     }
     return currentSeatCount;
   } catch (e) {
-    // Non-fatal: sidebar will just show stale data until next login
     console.warn("refreshSeatCount failed silently", e);
     return null;
   }

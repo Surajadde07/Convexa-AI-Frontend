@@ -301,7 +301,7 @@ function CallCard({ call, T, onOpen, onDelete, onAction, playingId, setPlayingId
             {/* Hover action bar */}
             <div className="flex items-center gap-2 px-5 py-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
                 style={{ borderTop: `1px solid ${T.divider}`, background: T.panelHover }}>
-                <Link to={`/calls/${call.id}`} onClick={e => e.stopPropagation()}
+                <Link to={`/w/${getUser()?.companySlug || "default"}/calls/${call.id}`} onClick={e => e.stopPropagation()}
                     className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all"
                     style={{ background: "rgba(139,92,246,0.14)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.3)" }}>
                     Open details <ArrowUpRight size={11} />
@@ -316,11 +316,13 @@ function CallCard({ call, T, onOpen, onDelete, onAction, playingId, setPlayingId
                     style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.textMuted }}>
                     <Share2 size={13} />
                 </button>
-                <button onClick={e => { e.stopPropagation(); onDelete(call); }} title="Delete"
-                    className="w-8 h-8 flex items-center justify-center rounded-lg transition-all flex-shrink-0"
-                    style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#f87171" }}>
-                    <Trash2 size={13} />
-                </button>
+                {(["OWNER", "ADMIN"].includes((getUser()?.role || "").toUpperCase()) || call.uploaderUserId === getUser()?.id || call.user?.id === getUser()?.id) && (
+                    <button onClick={e => { e.stopPropagation(); onDelete(call); }} title="Delete"
+                        className="w-8 h-8 flex items-center justify-center rounded-lg transition-all flex-shrink-0"
+                        style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#f87171" }}>
+                        <Trash2 size={13} />
+                    </button>
+                )}
             </div>
         </div>
     );
@@ -342,7 +344,7 @@ function QuickActions({ call, T, onDelete, onAction }) {
             </button>
             {open && (
                 <div className="absolute right-0 top-full mt-1.5 w-44 rounded-xl overflow-hidden z-30" style={{ background: T.headerBg, border: `1px solid ${T.panelBorder}`, backdropFilter: "blur(20px)", boxShadow: "0 12px 32px rgba(0,0,0,0.35)" }}>
-                    <Link to={`/calls/${call.id}`} className="flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold transition-all" style={{ color: T.text }}
+                    <Link to={`/w/${getUser()?.companySlug || "default"}/calls/${call.id}`} className="flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold transition-all" style={{ color: T.text }}
                         onMouseEnter={e => e.currentTarget.style.background = T.panelHover} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                         <ArrowUpRight size={13} /> Open details
                     </Link>
@@ -354,10 +356,12 @@ function QuickActions({ call, T, onDelete, onAction }) {
                         onMouseEnter={e => e.currentTarget.style.background = T.panelHover} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                         <Share2 size={13} /> Share
                     </button>
-                    <button onClick={() => { setOpen(false); onDelete(call); }} className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold transition-all" style={{ color: "#f87171" }}
-                        onMouseEnter={e => e.currentTarget.style.background = "rgba(239,68,68,0.1)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                        <Trash2 size={13} /> Delete
-                    </button>
+                    {(["OWNER", "ADMIN"].includes((getUser()?.role || "").toUpperCase()) || call.uploaderUserId === getUser()?.id || call.user?.id === getUser()?.id) && (
+                        <button onClick={() => { setOpen(false); onDelete(call); }} className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold transition-all" style={{ color: "#f87171" }}
+                            onMouseEnter={e => e.currentTarget.style.background = "rgba(239,68,68,0.1)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                            <Trash2 size={13} /> Delete
+                        </button>
+                    )}
                 </div>
             )}
         </div>
@@ -373,7 +377,8 @@ function CallRow({ call, T, onOpen, onDelete, onAction, playingId, setPlayingId 
     const risk = computeRisk(call);
     const riskCfg = risk ? RISK_CFG[risk] : null;
     const title = call.customerName || titleFromFileName(call.fileName);
-    const accent = call.overallScore >= 70 ? "#10b981" : call.overallScore >= 50 ? "#f59e0b" : call.overallScore != null ? "#ef4444" : "#8b5cf6";
+    const userRole = (getUser()?.role || "").toUpperCase();
+    const canDelete = ["OWNER", "ADMIN"].includes(userRole) || call.uploaderUserId === getUser()?.id || call.user?.id === getUser()?.id;
 
     return (
         <div onClick={() => onOpen(call)}
@@ -388,7 +393,10 @@ function CallRow({ call, T, onOpen, onDelete, onAction, playingId, setPlayingId 
                 </div>
                 <div className="min-w-0">
                     <p className="text-sm font-bold truncate" style={{ color: T.text }}>{title}</p>
-                    <p className="text-[11px] truncate" style={{ color: T.textFaint }}>{timeAgo(call.createdAt)}</p>
+                    <p className="text-[11px] truncate" style={{ color: T.textFaint }}>
+                        {call.uploaderName && <span className="text-violet-400 font-semibold mr-1">👤 {call.uploaderName} ·</span>}
+                        {timeAgo(call.createdAt)}
+                    </p>
                 </div>
             </div>
 
@@ -405,7 +413,7 @@ function CallRow({ call, T, onOpen, onDelete, onAction, playingId, setPlayingId 
             <div><ScorePill score={call.overallScore} T={T} /></div>
 
             <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-                <Link to={`/calls/${call.id}`}
+                <Link to={`/w/${getUser()?.companySlug || "default"}/calls/${call.id}`}
                     className="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all"
                     style={{ background: "rgba(139,92,246,0.12)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.28)" }}>
                     Open
@@ -416,9 +424,11 @@ function CallRow({ call, T, onOpen, onDelete, onAction, playingId, setPlayingId 
                 <button onClick={() => onAction("share", call)} title="Share" className="w-7 h-7 flex items-center justify-center rounded-lg transition-all" style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.textMuted }}>
                     <Share2 size={12} />
                 </button>
-                <button onClick={() => onDelete(call)} title="Delete" className="w-7 h-7 flex items-center justify-center rounded-lg transition-all" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#f87171" }}>
-                    <Trash2 size={12} />
-                </button>
+                {canDelete && (
+                    <button onClick={() => onDelete(call)} title="Delete" className="w-7 h-7 flex items-center justify-center rounded-lg transition-all" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#f87171" }}>
+                        <Trash2 size={12} />
+                    </button>
+                )}
             </div>
         </div>
     );
@@ -606,7 +616,7 @@ export default function HistoryPage() {
         setLoading(true);
         setError(null);
         try {
-            const res = await api.get("/api/calls/my-calls");
+            const res = await api.get("/api/calls");
             setCalls(res.data);
         } catch {
             setError("Failed to load call history.");
@@ -688,7 +698,7 @@ export default function HistoryPage() {
         }
     };
 
-    const openCall = (call) => navigate(`/calls/${call.id}`);
+    const openCall = (call) => navigate(`/w/${getUser()?.companySlug || "default"}/calls/${call.id}`);
 
     // ── Facets — only surfaced if the field actually exists somewhere in the data ──
     const facets = useMemo(() => ({
