@@ -7,7 +7,7 @@ import api, { getUser } from "../services/api.js";
 import {
     CreditCard, ShieldCheck, Sparkles, CheckCircle2,
     Users, HardDrive, Download, ArrowUpRight, Check,
-    AlertCircle, FileText, ArrowRight, Zap
+    AlertCircle, FileText, ArrowRight, Zap, Crown
 } from "lucide-react";
 
 export default function BillingSeatsPage() {
@@ -71,8 +71,8 @@ export default function BillingSeatsPage() {
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/10">
                         <div>
                             <div className="flex items-center gap-2 mb-1">
-                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-violet-500/20 text-violet-300 border border-violet-500/30">
-                                    👑 Owner Exclusive Portal
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-violet-500/20 text-violet-300 border border-violet-500/30 flex items-center gap-1">
+                                    <Crown size={11} className="text-violet-300" /> Owner Exclusive Portal
                                 </span>
                             </div>
                             <h1 className="text-2xl md:text-3xl font-black tracking-tight text-white flex items-center gap-2">

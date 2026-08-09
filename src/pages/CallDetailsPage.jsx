@@ -14,7 +14,7 @@ import {
     Zap, Brain, KeyRound, X, Sparkles, Download, Share2, RefreshCw,
     Search, Copy, CopyCheck, Gauge, ShieldAlert, Rocket,
     ThumbsUp, AlertOctagon, ListChecks, ChevronRight, Radio,
-    FileBarChart, HeartHandshake, Compass,
+    FileBarChart, HeartHandshake, Compass, DollarSign,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -322,6 +322,20 @@ export default function CallDetailsPage() {
     // ── Audio current time (lifted from AudioPlayer via callback) ──────────
     const [audioCurrentSec, setAudioCurrentSec] = useState(0);
 
+    // ── Deal Management Lite State ──────────────────────────────────────────
+    const [dealValue, setDealValue] = useState("");
+    const [dealStatus, setDealStatus] = useState("OPEN");
+    const [dealStage, setDealStage] = useState("DISCOVERY");
+    const [savingDeal, setSavingDeal] = useState(false);
+    const [dealError, setDealError] = useState(null);
+
+    // ── In-App Notification Toast State ──────────────────────────────────────
+    const [toast, setToast] = useState(null);
+    const showToast = (message, type = "success") => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 3500);
+    };
+
     // ── Presentation-only additions: do not affect data, routing, or API ───
     const [copiedLink, setCopiedLink] = useState(false);
     const [copiedTranscript, setCopiedTranscript] = useState(false);
@@ -364,6 +378,73 @@ export default function CallDetailsPage() {
         if (!currentWorkspace?.company?.id) return;
         fetchCallDetails();
     }, [id, currentWorkspace?.company?.id]);
+
+    useEffect(() => {
+        if (call?.deal) {
+            setDealValue(call.deal.dealValue?.toString() || "");
+            setDealStatus(call.deal.dealStatus || "OPEN");
+            setDealStage(call.deal.dealStage || "DISCOVERY");
+        } else {
+            setDealValue("");
+            setDealStatus("OPEN");
+            setDealStage("DISCOVERY");
+        }
+        setDealError(null);
+    }, [call]);
+
+    const handleSaveDeal = () => {
+        if (!dealValue || isNaN(Number(dealValue)) || Number(dealValue) < 0) {
+            setDealError("Please enter a valid non-negative deal value");
+            return;
+        }
+
+        setSavingDeal(true);
+        setDealError(null);
+
+        const finalStage = dealStatus === "OPEN" ? dealStage : "CLOSED";
+
+        api.post(`/api/calls/${id}/deal`, {
+            dealValue: Number(dealValue),
+            dealStatus,
+            dealStage: finalStage
+        })
+        .then(r => {
+            setCall(prev => ({
+                ...prev,
+                deal: r.data
+            }));
+            showToast("Deal saved successfully", "success");
+        })
+        .catch(err => {
+            const msg = err.response?.data?.message || err.response?.data || "Could not save deal information.";
+            setDealError(typeof msg === "string" ? msg : "Could not save deal information.");
+            showToast(typeof msg === "string" ? msg : "Deal could not be saved", "error");
+        })
+        .finally(() => setSavingDeal(false));
+    };
+
+    const handleRemoveDeal = () => {
+        setSavingDeal(true);
+        setDealError(null);
+
+        api.delete(`/api/calls/${id}/deal`)
+        .then(() => {
+            setCall(prev => ({
+                ...prev,
+                deal: null
+            }));
+            setDealValue("");
+            setDealStatus("OPEN");
+            setDealStage("DISCOVERY");
+            showToast("Deal removed successfully", "success");
+        })
+        .catch(err => {
+            const msg = err.response?.data?.message || err.response?.data || "Could not remove deal information.";
+            setDealError(typeof msg === "string" ? msg : "Could not remove deal information.");
+            showToast(typeof msg === "string" ? msg : "Deal could not be removed", "error");
+        })
+        .finally(() => setSavingDeal(false));
+    };
 
     /**
      * Fallback timeline generator — unchanged from the original implementation.
@@ -419,7 +500,7 @@ export default function CallDetailsPage() {
             generateCallReport(call);
         } catch (err) {
             console.error("Report generation failed:", err);
-            alert("Could not generate report. Please make sure jsPDF is installed:\n\nnpm install jspdf");
+            showToast("Could not generate report. jsPDF is not installed.", "error");
         } finally {
             setReportLoading(false);
         }
@@ -801,6 +882,103 @@ export default function CallDetailsPage() {
                                 </div>
                             </GlassCard>
                         )}
+
+                        {/* ── DEAL INFORMATION (Lite CRM editor) ── */}
+                        <GlassCard className="p-5">
+                            <div className="flex items-center justify-between mb-4">
+                                <SectionLabel icon={DollarSign} tone="#8b5cf6">Deal Information</SectionLabel>
+                                {call.deal ? (
+                                    <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                                        Attached
+                                    </span>
+                                ) : (
+                                    <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-slate-500/10 border border-slate-500/20 text-slate-400">
+                                        No Deal Attached
+                                    </span>
+                                )}
+                            </div>
+
+                            <p className="text-xs text-slate-400 mb-4">
+                                Optional — Attach this call to a sales opportunity to track pipeline.
+                            </p>
+
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Deal Value ($)</label>
+                                        <div className="relative">
+                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                <DollarSign className="h-3.5 w-3.5 text-slate-500" />
+                                            </div>
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                min="0"
+                                                placeholder="0.00"
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 pl-8 pr-3 text-sm text-white focus:outline-none focus:border-violet-500 transition-colors"
+                                                value={dealValue}
+                                                onChange={(e) => setDealValue(e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Deal Status</label>
+                                        <select
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-white focus:outline-none focus:border-violet-500 transition-colors"
+                                            value={dealStatus}
+                                            onChange={(e) => setDealStatus(e.target.value)}
+                                        >
+                                            <option value="OPEN">Open</option>
+                                            <option value="WON">Won</option>
+                                            <option value="LOST">Lost</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Deal Stage</label>
+                                        <select
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-sm text-white focus:outline-none focus:border-violet-500 transition-colors"
+                                            value={dealStage}
+                                            disabled={dealStatus !== "OPEN"}
+                                            onChange={(e) => setDealStage(e.target.value)}
+                                        >
+                                            <option value="DISCOVERY">Discovery</option>
+                                            <option value="DEMO">Demo</option>
+                                            <option value="PROPOSAL">Proposal</option>
+                                            <option value="NEGOTIATION">Negotiation</option>
+                                            <option value="CLOSED">Closed</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                {dealError && (
+                                    <p className="text-xs text-red-400 font-medium">{dealError}</p>
+                                )}
+
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        type="button"
+                                        disabled={savingDeal}
+                                        onClick={handleSaveDeal}
+                                        className="px-4 py-2 text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white rounded-xl border border-violet-500/30 transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {savingDeal ? "Saving..." : "Save Deal"}
+                                    </button>
+
+                                    {call.deal && (
+                                        <button
+                                            type="button"
+                                            disabled={savingDeal}
+                                            onClick={handleRemoveDeal}
+                                            className="px-4 py-2 text-xs font-bold bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl border border-red-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            Remove Deal
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </GlassCard>
 
                         {/* ── ACTION ITEMS + RISK FLAGS ── */}
                         {(() => {
@@ -1186,6 +1364,26 @@ export default function CallDetailsPage() {
                     </div>
                 )}
             </main>
+
+            {toast && (
+                <div className="fixed bottom-6 right-6 left-6 sm:left-auto z-[100] flex items-center gap-3 px-5 py-3.5 rounded-2xl border backdrop-blur-xl shadow-2xl"
+                    style={{
+                        background: toast.type === "error" ? "rgba(239,68,68,0.15)" : "rgba(139,92,246,0.15)",
+                        borderColor: toast.type === "error" ? "rgba(239,68,68,0.4)" : "rgba(139,92,246,0.4)",
+                        animation: "slideUp 0.35s cubic-bezier(0.34,1.56,0.64,1)",
+                        boxShadow: toast.type === "error" ? "0 8px 32px rgba(239,68,68,0.2)" : "0 8px 32px rgba(139,92,246,0.2)",
+                    }}>
+                    {toast.type === "error" ? (
+                        <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                    ) : (
+                        <CheckCircle2 className="w-4 h-4 text-violet-400 flex-shrink-0" />
+                    )}
+                    <span className="text-sm font-semibold text-white">{toast.message}</span>
+                    <button onClick={() => setToast(null)} className="ml-2 opacity-50 hover:opacity-100 transition-opacity">
+                        <X className="w-3.5 h-3.5 text-white" />
+                    </button>
+                </div>
+            )}
 
             {shareToast && (
                 <div className="fixed bottom-6 right-6 left-6 sm:left-auto z-[100] flex items-center gap-3 px-5 py-4 rounded-2xl border backdrop-blur-xl shadow-2xl"

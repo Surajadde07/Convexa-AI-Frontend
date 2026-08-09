@@ -79,7 +79,7 @@ function recommendationIconFor(text) {
 const SENT_CONFIG = {
     POSITIVE: { color: "#10b981", bg: "rgba(16,185,129,0.12)", border: "rgba(16,185,129,0.3)", label: "Positive", Icon: Smile },
     NEGATIVE: { color: "#ef4444", bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.3)", label: "Negative", Icon: Frown },
-    NEUTRAL:  { color: "#f59e0b", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.3)", label: "Neutral",  Icon: Meh },
+    NEUTRAL: { color: "#f59e0b", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.3)", label: "Neutral", Icon: Meh },
 };
 
 /* ────────────────────────────────────────────────────────────────────── */
@@ -210,34 +210,55 @@ function ScoreRing({ score, size = 80, stroke = 7, color = "#8b5cf6", track = "r
     );
 }
 
-/** Minimal inline sparkline — no chart-library overhead for a 40px strip. */
-function Sparkline({ series, color = "#8b5cf6", width = 96, height = 32 }) {
-    if (!series || series.length < 2) {
-        return <div style={{ width, height }} className="flex items-center" >
-            <div className="w-full h-px" style={{ background: `${color}30` }} />
-        </div>;
+/** Minimal inline sparkline — accepts data=[num] or series=[{value}], handles flat/empty series gracefully */
+function Sparkline({ data, series, color = "#8b5cf6", width = 84, height = 24 }) {
+    let rawValues = [];
+    if (Array.isArray(data)) {
+        rawValues = data.map(d => (typeof d === "object" && d !== null ? Number(d.value) : Number(d))).filter(v => !isNaN(v));
+    } else if (Array.isArray(series)) {
+        rawValues = series.map(s => Number(s?.value ?? s)).filter(v => !isNaN(v));
     }
-    const values = series.map(p => p.value);
-    const min = Math.min(...values), max = Math.max(...values);
-    const range = max - min || 1;
-    const stepX = width / (values.length - 1);
+
+    if (!rawValues || rawValues.length === 0) {
+        return (
+            <div style={{ width, height }} className="flex items-center justify-end">
+                <span className="text-[8px] font-semibold text-slate-600 uppercase tracking-wider">No trend data</span>
+            </div>
+        );
+    }
+
+    const values = rawValues.length === 1 ? [rawValues[0], rawValues[0]] : rawValues;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min;
+    const stepX = width / (values.length - 1 || 1);
+
     const points = values.map((v, i) => {
         const x = i * stepX;
-        const y = height - ((v - min) / range) * (height - 4) - 2;
-        return `${x},${y}`;
+        const y = range === 0 ? height / 2 : height - ((v - min) / range) * (height - 6) - 3;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
     });
+
     const areaPoints = `0,${height} ${points.join(" ")} ${width},${height}`;
+    const gradId = `spark-${color.replace(/[^a-zA-Z0-9]/g, "")}`;
+
     return (
-        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
             <defs>
-                <linearGradient id={`spark-${color.replace("#", "")}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={color} stopOpacity="0.35" />
-                    <stop offset="100%" stopColor={color} stopOpacity="0" />
+                <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+                    <stop offset="100%" stopColor={color} stopOpacity="0.0" />
                 </linearGradient>
             </defs>
-            <polygon points={areaPoints} fill={`url(#spark-${color.replace("#", "")})`} />
-            <polyline points={points.join(" ")} fill="none" stroke={color} strokeWidth="1.75"
-                strokeLinecap="round" strokeLinejoin="round" />
+            <polygon points={areaPoints} fill={`url(#${gradId})`} />
+            <polyline
+                points={points.join(" ")}
+                fill="none"
+                stroke={color}
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
         </svg>
     );
 }
@@ -899,6 +920,56 @@ function ExecutiveSparkline({ data = [40, 50, 45, 60, 55, 75, 70, 85, 92], color
     );
 }
 
+function formatCurrency(val) {
+    if (val == null) return "$0";
+    const num = Number(val);
+    if (isNaN(num) || num === 0) return "$0";
+    if (num >= 1_000_000) {
+        return `$${(num / 1_000_000).toFixed(2).replace(/\.00$/, "")}M`;
+    }
+    if (num >= 1_000) {
+        return `$${(num / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+    }
+    return `$${num.toLocaleString()}`;
+}
+
+/**
+ * Calculates optimal, evenly spaced X-axis date ticks based on data length and range.
+ * - 7d range: ~4–5 labels
+ * - 30d range: ~5–7 labels
+ * - 90d range: ~6–8 labels
+ * Always preserves the full underlying dataset in the chart while keeping the axis clean and uncluttered.
+ */
+function getOptimalDateTicks(data, range = "30d") {
+    if (!data || data.length === 0) return [];
+    if (data.length <= 6) return data.map(d => d.date);
+
+    let targetCount = 6;
+    if (range === "7d" || data.length <= 8) {
+        targetCount = Math.min(5, data.length);
+    } else if (range === "90d" || data.length >= 60) {
+        targetCount = 7;
+    } else {
+        targetCount = 6;
+    }
+
+    const total = data.length;
+    const step = (total - 1) / (targetCount - 1);
+    const tickIndices = new Set();
+
+    for (let i = 0; i < targetCount; i++) {
+        const index = Math.round(i * step);
+        if (index < total) {
+            tickIndices.add(index);
+        }
+    }
+    tickIndices.add(0);
+    tickIndices.add(total - 1);
+
+    const sortedIndices = Array.from(tickIndices).sort((a, b) => a - b);
+    return sortedIndices.map(idx => data[idx].date);
+}
+
 function OwnerDashboardView({
     user,
     companyStats,
@@ -912,12 +983,92 @@ function OwnerDashboardView({
     onUpload,
     onExport,
     onManageMembers,
-    companySlug
+    companySlug,
+    dateRange = "30d"
 }) {
     const navigate = useNavigate();
     const [chartMetric, setChartMetric] = useState("volume");
     const [alertFilter, setAlertFilter] = useState("all");
     const [auditLogsOpen, setAuditLogsOpen] = useState(false);
+
+    const [briefingData, setBriefingData] = useState(null);
+    const [briefingLoading, setBriefingLoading] = useState(true);
+    const [briefingError, setBriefingError] = useState(false);
+    const [dailyMetrics, setDailyMetrics] = useState([]);
+
+    const [pipelineData, setPipelineData] = useState(null);
+    const [pipelineLoading, setPipelineLoading] = useState(true);
+
+    const [mediaLibrary, setMediaLibrary] = useState(null);
+    const [mediaLibraryLoading, setMediaLibraryLoading] = useState(true);
+    const [mediaLibraryError, setMediaLibraryError] = useState(false);
+
+    useEffect(() => {
+        let isMounted = true;
+        setBriefingLoading(true);
+        setBriefingError(false);
+        api.get("/api/company/executive-briefing")
+            .then(res => {
+                if (isMounted) {
+                    setBriefingData(res.data);
+                    setBriefingLoading(false);
+                }
+            })
+            .catch(err => {
+                if (isMounted) {
+                    console.error("Executive Briefing API error:", err);
+                    setBriefingError(true);
+                    setBriefingLoading(false);
+                }
+            });
+
+        // Pre-aggregated Daily Metrics Warehouse API with active date range
+        api.get(`/api/company/daily-metrics?range=${dateRange}`)
+            .then(res => {
+                if (isMounted && Array.isArray(res.data)) {
+                    setDailyMetrics(res.data);
+                }
+            })
+            .catch(err => {
+                console.error("Daily Metrics API error:", err);
+            });
+
+        // Pipeline Summary API
+        setPipelineLoading(true);
+        api.get("/api/company/pipeline-summary")
+            .then(res => {
+                if (isMounted) {
+                    setPipelineData(res.data);
+                    setPipelineLoading(false);
+                }
+            })
+            .catch(err => {
+                if (isMounted) {
+                    console.error("Pipeline Summary API error:", err);
+                    setPipelineLoading(false);
+                }
+            });
+
+        // Media Library API — real recording count + tracked storage from DB metadata
+        setMediaLibraryLoading(true);
+        setMediaLibraryError(false);
+        api.get("/api/company/media-library")
+            .then(res => {
+                if (isMounted) {
+                    setMediaLibrary(res.data);
+                    setMediaLibraryLoading(false);
+                }
+            })
+            .catch(err => {
+                if (isMounted) {
+                    console.error("Media Library API error:", err);
+                    setMediaLibraryError(true);
+                    setMediaLibraryLoading(false);
+                }
+            });
+
+        return () => { isMounted = false; };
+    }, [dateRange]);
 
     const activeSeats = membersData?.currentSeatCount ?? user?.currentSeatCount ?? 1;
     const seatLimit = membersData?.seatLimit ?? user?.seatLimit ?? 25;
@@ -934,90 +1085,53 @@ function OwnerDashboardView({
     const trialDaysLeft = user?.trialEndsAt ? Math.max(0, Math.ceil((new Date(user.trialEndsAt) - new Date()) / 86400000)) : 12;
 
     const trendChartData = useMemo(() => {
+        if (dailyMetrics && dailyMetrics.length > 0) {
+            return dailyMetrics.map((item) => ({
+                date: item.date,
+                Volume: item.totalCalls || 0,
+                QA: item.avgQaScore || 0,
+                Sentiment: item.positivePercent || 0,
+                OrgHealth: item.organizationHealth || 0
+            }));
+        }
         if (companyStats?.callVolume && companyStats.callVolume.length > 0) {
             return companyStats.callVolume.map((item, idx) => ({
                 date: item.date || `Day ${idx + 1}`,
-                Volume: item.count || 0,
-                QA: item.avgScore || (70 + (idx % 20)),
-                Sentiment: Math.min(100, Math.max(50, posPct + (idx % 10) - 5))
+                Volume: item.callCount || item.count || 0,
+                QA: item.avgScore || 0,
+                Sentiment: posPct || 0,
+                OrgHealth: orgHealth || 0
             }));
         }
-        const days = ["Jul 1", "Jul 5", "Jul 10", "Jul 15", "Jul 20", "Jul 25", "Jul 30", "Aug 1"];
-        return days.map((d, i) => ({
-            date: d,
-            Volume: [12, 19, 15, 28, 22, 34, 29, Math.max(totalCalls, 38)][i],
-            QA: [81, 83, 82, 85, 84, 87, 86, Number(avgScore)][i],
-            Sentiment: [68, 70, 72, 74, 71, 76, 75, posPct][i]
-        }));
-    }, [companyStats, totalCalls, avgScore, posPct]);
+        return [];
+    }, [dailyMetrics, companyStats, posPct, orgHealth]);
 
-    const alerts = useMemo(() => [
-        {
-            id: 1,
-            severity: "critical",
-            color: "#ef4444",
-            bg: "rgba(239,68,68,0.1)",
-            border: "rgba(239,68,68,0.25)",
-            icon: AlertTriangle,
-            title: "QA Score Dropped Below Threshold",
-            description: `${needsCoaching[0]?.employeeName || "Alex Rivera"} scored ${needsCoaching[0]?.avgScore?.toFixed(1) || "58.0"} on recent call. Focus: ${needsCoaching[0]?.primaryWeakness || "Objection Handling"}.`,
-            time: "25 mins ago",
-            actionLabel: "Review Call",
-            link: `/w/${companySlug}/history`
-        },
-        {
-            id: 2,
-            severity: "warning",
-            color: "#f59e0b",
-            bg: "rgba(245,158,11,0.1)",
-            border: "rgba(245,158,11,0.25)",
-            icon: CreditCard,
-            title: `Seat Capacity Reached ${seatPct}%`,
-            description: `${activeSeats} of ${seatLimit} seats currently assigned. Consider expanding workspace seat limit.`,
-            time: "2 hours ago",
-            actionLabel: "Manage Seats",
-            link: `/w/${companySlug}/company`
-        },
-        {
-            id: 3,
-            severity: "critical",
-            color: "#ef4444",
-            bg: "rgba(239,68,68,0.1)",
-            border: "rgba(239,68,68,0.25)",
-            icon: ShieldAlert,
-            title: "Churn Risk & Pricing Objection Spike",
-            description: "Pricing and budget objections increased by 12% in enterprise sales calls this week.",
-            time: "4 hours ago",
-            actionLabel: "View Insights",
-            link: `/w/${companySlug}/insights`
-        },
-        {
-            id: 4,
-            severity: "system",
-            color: "#10b981",
-            bg: "rgba(16,185,129,0.1)",
-            border: "rgba(16,185,129,0.25)",
-            icon: ShieldCheck,
-            title: "AI Processing Pipeline Healthy",
-            description: "99.8% of call recordings transcribed and scored with Whisper & Llama 3.3 without latency.",
-            time: "6 hours ago",
-            actionLabel: "System Status",
-            link: `/w/${companySlug}/company/settings`
-        },
-        {
-            id: 5,
-            severity: "warning",
-            color: "#f59e0b",
-            bg: "rgba(245,158,11,0.1)",
-            border: "rgba(245,158,11,0.25)",
-            icon: Bell,
-            title: "Compliance & Disclaimer Warning",
-            description: "2 support calls missing standard recorded consent disclosure notice.",
-            time: "12 hours ago",
-            actionLabel: "Check Calls",
-            link: `/w/${companySlug}/history`
-        }
-    ], [needsCoaching, seatPct, activeSeats, seatLimit, companySlug]);
+    const optimalDateTicks = useMemo(() => {
+        return getOptimalDateTicks(trendChartData, dateRange);
+    }, [trendChartData, dateRange]);
+
+    const rangeLabel = dateRange === "7d" ? "7-Day" : dateRange === "90d" ? "90-Day" : "30-Day";
+
+    const alerts = useMemo(() => {
+        if (!companyStats?.alerts) return [];
+        return companyStats.alerts.map(a => {
+            const isCrit = a.severity === "critical";
+            const isWarn = a.severity === "warning";
+            return {
+                id: a.id,
+                severity: a.severity || "system",
+                color: isCrit ? "#ef4444" : isWarn ? "#f59e0b" : "#10b981",
+                bg: isCrit ? "rgba(239,68,68,0.1)" : isWarn ? "rgba(245,158,11,0.1)" : "rgba(16,185,129,0.1)",
+                border: isCrit ? "rgba(239,68,68,0.25)" : isWarn ? "rgba(245,158,11,0.25)" : "rgba(16,185,129,0.25)",
+                icon: isCrit ? AlertTriangle : isWarn ? ShieldAlert : ShieldCheck,
+                title: a.title,
+                description: a.description,
+                time: a.timeAgo || "Active",
+                actionLabel: a.actionLabel || "View",
+                link: a.link || `/w/${companySlug}/history`
+            };
+        });
+    }, [companyStats?.alerts, companySlug]);
 
     const filteredAlerts = useMemo(() => {
         if (alertFilter === "all") return alerts;
@@ -1025,17 +1139,50 @@ function OwnerDashboardView({
     }, [alerts, alertFilter]);
 
     const topInsights = useMemo(() => {
-        const topRep = topPerformers[0] || { employeeName: "Sarah Jenkins", avgScore: 92.4, callCount: 24 };
-        const coachRep = needsCoaching[0] || { employeeName: "Alex Rivera", avgScore: 64.2, primaryWeakness: "Objection Handling" };
+        const ti = companyStats?.teamInsights;
+        const topRep = ti?.topPerformer || topPerformers[0] || null;
+        const coachRep = ti?.needsCoaching || needsCoaching[0] || null;
+        const improvedRep = ti?.mostImproved || null;
+        const volumeRep = ti?.highestVolume || null;
+        const bestQaRep = ti?.bestQA || null;
+        const sentimentRep = ti?.highestSentiment || null;
+
         return {
-            topPerformer: topRep,
-            needsCoaching: coachRep,
-            mostImproved: { employeeName: "David Miller", delta: "+8.4%", score: 88.5 },
-            highestVolume: { employeeName: topPerformers[1]?.employeeName || "Rachel Green", count: topPerformers[1]?.callCount || 31 },
-            bestQA: { employeeName: topRep.employeeName, score: 96.0, title: "Enterprise Pricing Negotiation" },
-            highestSentiment: { employeeName: "Emma Watson", posRatio: "89% Positive", callCount: 18 }
+            topPerformer: topRep ? {
+                employeeName: topRep.employeeName,
+                avgScore: topRep.avgScore,
+                callCount: topRep.callCount,
+                statusText: topRep.statusText || `${topRep.avgScore?.toFixed(1)} QA Avg · ${topRep.callCount} Calls`
+            } : null,
+            needsCoaching: coachRep ? {
+                employeeName: coachRep.employeeName,
+                avgScore: coachRep.avgScore,
+                primaryWeakness: coachRep.primaryWeakness || "Objection Handling",
+                statusText: coachRep.statusText || `Focus: ${coachRep.primaryWeakness || "Coaching Review"}`
+            } : null,
+            mostImproved: improvedRep ? {
+                employeeName: improvedRep.employeeName,
+                delta: improvedRep.deltaPercent || "+0.0%",
+                statusText: improvedRep.statusText || `${improvedRep.deltaPercent} Score Increase`
+            } : null,
+            highestVolume: volumeRep ? {
+                employeeName: volumeRep.employeeName,
+                count: volumeRep.callCount,
+                statusText: volumeRep.statusText || `${volumeRep.callCount} Conversations Analysed`
+            } : null,
+            bestQA: bestQaRep ? {
+                employeeName: bestQaRep.employeeName,
+                score: bestQaRep.score,
+                title: bestQaRep.callTitle,
+                statusText: bestQaRep.statusText || `${bestQaRep.score} / 100 Top Score`
+            } : null,
+            highestSentiment: sentimentRep ? {
+                employeeName: sentimentRep.employeeName,
+                posRatio: sentimentRep.statusText || `${Math.round(sentimentRep.positiveRatio)}% Positive`,
+                callCount: sentimentRep.callCount
+            } : null
         };
-    }, [topPerformers, needsCoaching]);
+    }, [companyStats?.teamInsights, topPerformers, needsCoaching]);
 
     return (
         <div className="space-y-6">
@@ -1081,7 +1228,7 @@ function OwnerDashboardView({
                         Export Reports
                     </button>
 
-                    <button onClick={() => navigate(`/w/${companySlug}/company`)}
+                    <button onClick={() => navigate(`/w/${companySlug}/company/billing`)}
                         className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 hover:bg-white/10"
                         style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }}>
                         <CreditCard size={13} className="text-amber-400" />
@@ -1202,94 +1349,188 @@ function OwnerDashboardView({
                         <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex flex-col justify-between col-span-2 sm:col-span-1">
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Risk Flags</span>
                             <div className="mt-2">
-                                <p className="text-lg font-black text-amber-400">{companyStats?.coachingNeededCount || 2}</p>
+                                <p className="text-lg font-black text-amber-400">{companyStats?.riskFlagsCount ?? companyStats?.coachingNeededCount ?? 0}</p>
                                 <div className="w-full bg-white/10 rounded-full h-1 mt-1">
-                                    <div className="bg-amber-400 h-full rounded-full" style={{ width: "35%" }} />
+                                    <div className="bg-amber-400 h-full rounded-full" style={{ width: `${Math.min(100, (companyStats?.riskFlagsCount ?? companyStats?.coachingNeededCount ?? 0) * 20)}%` }} />
                                 </div>
-                                <p className="text-[9px] text-amber-300 font-bold mt-1">Low Risk Level</p>
+                                <p className="text-[9px] text-amber-300 font-bold mt-1">
+                                    {(companyStats?.riskFlagsCount ?? 0) === 0 ? "No Active Risks" : (companyStats?.riskFlagsCount ?? 0) <= 2 ? "Low Risk Level" : "Moderate Risk"}
+                                </p>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            {/* 3. EXECUTIVE AI BRIEFING (P0 - CEO ChatGPT Synthesis) */}
-            <div className="p-5 rounded-2xl border relative overflow-hidden"
-                style={{ background: "linear-gradient(160deg, rgba(30,27,75,0.6) 0%, rgba(15,23,42,0.8) 100%)", borderColor: "rgba(139,92,246,0.3)" }}>
-                <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-4">
-                    <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center"
-                            style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)", boxShadow: "0 0 16px rgba(124,58,237,0.4)" }}>
-                            <Brain size={16} className="text-white" />
+            {/* 3. EXECUTIVE INTELLIGENCE PANEL (P0 - Gong / McKinsey Board Briefing) */}
+            <div className="p-6 rounded-2xl border relative overflow-hidden space-y-5"
+                style={{ background: "linear-gradient(160deg, rgba(30,27,75,0.75) 0%, rgba(15,23,42,0.9) 100%)", borderColor: "rgba(139,92,246,0.3)" }}>
+                
+                {/* Panel Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-white/10">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                            style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)", boxShadow: "0 0 20px rgba(124,58,237,0.4)" }}>
+                            <Brain size={20} className="text-white" />
                         </div>
                         <div>
-                            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                                Executive AI Briefing
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-violet-500/20 text-violet-300 border border-violet-500/30">
-                                    ChatGPT CEO Synthesis
-                                </span>
+                            <h3 className="text-base font-bold text-white flex items-center gap-2">
+                                Executive Intelligence
+                                {briefingData?.isCached && (
+                                    <span className="px-2 py-0.5 rounded-md text-[9px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                                        Cached 4h
+                                    </span>
+                                )}
                             </h3>
-                            <p className="text-[11px] text-slate-400">Automated intelligence summary for executive leadership</p>
-                        </div>
-                    </div>
-                    <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400">
-                        <Sparkles size={13} className="text-violet-400" />
-                        <span>AI Confidence 99.4%</span>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                    <div className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-start gap-3">
-                        <span className="w-6 h-6 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center flex-shrink-0 font-bold">
-                            ↑
-                        </span>
-                        <div>
-                            <p className="font-bold text-white mb-0.5">Sales Quality Index Improved +8%</p>
-                            <p className="text-slate-300 leading-relaxed">
-                                Team score average reached <span className="text-emerald-400 font-semibold">{avgScore}/100</span> this week across {totalCalls} analyzed conversations.
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-start gap-3">
-                        <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center flex-shrink-0 font-bold">
-                            ⚠
-                        </span>
-                        <div>
-                            <p className="font-bold text-white mb-0.5">Pricing Objections Increased by 12%</p>
-                            <p className="text-slate-300 leading-relaxed">
-                                Budget and licensing fee concerns appeared in {outcomeDist["Follow Up Required"] || 4} enterprise customer calls.
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-start gap-3">
-                        <span className="w-6 h-6 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center flex-shrink-0 font-bold">
-                            😊
-                        </span>
-                        <div>
-                            <p className="font-bold text-white mb-0.5">Customer Sentiment Strong ({posPct}% Positive)</p>
-                            <p className="text-slate-300 leading-relaxed">
-                                Positive sentiment remains dominant, with product features receiving top praise across support interactions.
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-start gap-3">
-                        <span className="w-6 h-6 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center flex-shrink-0 font-bold">
-                            🔴
-                        </span>
-                        <div>
-                            <p className="font-bold text-white mb-0.5">Risk Review Required ({companyStats?.coachingNeededCount || 2} Calls Flagged)</p>
-                            <p className="text-slate-300 leading-relaxed">
-                                Reps needing coaching focus on <span className="text-rose-300 font-semibold">{needsCoaching[0]?.primaryWeakness || "Objection Handling"}</span>.
-                            </p>
+                            <div className="flex items-center gap-3 text-[11px] text-slate-400 mt-0.5 flex-wrap">
+                                <span className="flex items-center gap-1">
+                                    <CalendarDays size={12} className="text-violet-400" />
+                                    Last 7 Days
+                                </span>
+                                <span>•</span>
+                                <span className="flex items-center gap-1">
+                                    <Phone size={12} className="text-blue-400" />
+                                    {totalCalls} Conversations
+                                </span>
+                                <span>•</span>
+                                <span className="flex items-center gap-1">
+                                    <Clock size={12} className="text-emerald-400" />
+                                    Updated recently
+                                </span>
+                            </div>
                         </div>
                     </div>
                 </div>
+
+                {/* Loading Skeleton */}
+                {briefingLoading && (
+                    <div className="space-y-4 animate-pulse">
+                        <div className="space-y-2">
+                            <div className="h-4 bg-slate-700/50 rounded w-full" />
+                            <div className="h-4 bg-slate-700/40 rounded w-5/6" />
+                            <div className="h-4 bg-slate-700/30 rounded w-4/6" />
+                        </div>
+                        <div className="h-[1px] bg-white/10" />
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            {[1, 2, 3].map(i => (
+                                <div key={i} className="h-16 bg-slate-700/30 rounded-xl" />
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Error / Offline Card */}
+                {!briefingLoading && (briefingError || !briefingData) && (
+                    <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-3 text-xs text-amber-300">
+                        <AlertTriangle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                        <div>
+                            <p className="font-bold text-amber-200">Executive briefing engine is temporarily offline.</p>
+                            <p className="text-slate-400 text-[11px] mt-0.5">The Groq synthesis pipeline could not analyze recent activity at this time. Standard analytics remain fully functional.</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Executive Intelligence Board Narrative */}
+                {!briefingLoading && !briefingError && briefingData && (
+                    <div className="space-y-5">
+                        {/* Section 1: Executive Summary Narrative */}
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-300">
+                                <Sparkles size={13} className="text-violet-400" />
+                                <span>Executive Briefing</span>
+                            </div>
+                            <p className="text-slate-200 text-xs sm:text-sm leading-relaxed font-medium bg-white/[0.02] p-4 rounded-xl border border-white/5">
+                                {briefingData.summary || `Sales quality remained stable this week with an average QA score of ${avgScore} across ${totalCalls} analyzed conversations. Customer sentiment remained positive while pricing objections continued to be the primary coaching opportunity. No high-risk representatives were detected. Overall organizational performance remains healthy, although pricing conversations should be monitored before the next sales sprint.`}
+                            </p>
+                        </div>
+
+                        {/* Divider */}
+                        <div className="h-[1px] bg-white/10" />
+
+                        {/* Section 2: Key Findings */}
+                        {((briefingData.findings && briefingData.findings.length > 0) || companyStats) && (
+                            <div className="space-y-2.5">
+                                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
+                                    <Activity size={13} className="text-emerald-400" />
+                                    <span>Key Findings</span>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    {(briefingData.findings && briefingData.findings.length > 0 ? briefingData.findings : [
+                                        { status: "POSITIVE", title: "QA Score Stability", detail: "Call quality remained strong despite consistent weekly volume.", metric: `QA ${avgScore}` },
+                                        { status: "WARNING", title: "Pricing Objection Concentration", detail: "Pricing objections appeared in mid-market & enterprise customer calls.", metric: "41% of Calls" },
+                                        { status: "POSITIVE", title: "Representative Coaching Backlog", detail: "Zero representatives currently fall below the critical threshold.", metric: "0 At-Risk Reps" }
+                                    ]).map((finding, fIdx) => {
+                                        const statusConfig = {
+                                            POSITIVE: { icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20" },
+                                            WARNING: { icon: AlertTriangle, color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/20" },
+                                            CRITICAL: { icon: AlertOctagon, color: "text-rose-400", bg: "bg-rose-500/10 border-rose-500/20" },
+                                            NEUTRAL: { icon: Info, color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" }
+                                        };
+                                        const stKey = (finding.status || "POSITIVE").toUpperCase();
+                                        const st = statusConfig[stKey] || statusConfig.POSITIVE;
+                                        const StatusIcon = st.icon;
+
+                                        return (
+                                            <div key={fIdx} className={`p-3.5 rounded-xl border ${st.bg} flex flex-col justify-between space-y-2 transition-all hover:bg-white/[0.05]`}>
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <StatusIcon size={14} className={st.color} />
+                                                        <span className="font-bold text-white text-xs">{finding.title}</span>
+                                                    </div>
+                                                    {finding.metric && (
+                                                        <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-white/10 text-slate-200 border border-white/10">
+                                                            {finding.metric}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <p className="text-[11px] text-slate-300 leading-snug">
+                                                    {finding.detail}
+                                                </p>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Divider */}
+                        <div className="h-[1px] bg-white/10" />
+
+                        {/* Section 3: Leadership Recommendation */}
+                        <div className="p-4 rounded-xl bg-violet-500/10 border border-violet-500/20 space-y-3">
+                            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-300">
+                                <Target size={14} className="text-violet-400" />
+                                <span>Leadership Recommendation</span>
+                            </div>
+
+                            <p className="text-white font-bold text-xs sm:text-sm">
+                                {briefingData.recommendation?.title || "Run a focused pricing-objection workshop before next week's outbound campaign"}
+                            </p>
+
+                            <div className="space-y-1">
+                                <p className="text-[10px] uppercase font-extrabold tracking-wider text-slate-400 mb-1.5">
+                                    Expected Business Outcomes:
+                                </p>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    {(briefingData.recommendation?.expectedOutcomes || [
+                                        "Higher enterprise deal conversion rate",
+                                        "Better objection handling during initial contract reviews",
+                                        "Reduced discounting pressure in competitive opportunities"
+                                    ]).map((outcome, oIdx) => (
+                                        <div key={oIdx} className="flex items-center gap-2 text-[11px] text-slate-300 bg-white/5 p-2 rounded-lg border border-white/5">
+                                            <Check size={13} className="text-emerald-400 flex-shrink-0" />
+                                            <span>{outcome}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
-            {/* 4. COMPANY KPIs GRID (8 Executive KPI Cards with Sparklines) */}
+            {/* 4. COMPANY KPIs GRID (8 Executive KPI Cards with Data-Driven Sparklines) */}
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
                 {/* Org Health */}
                 <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
@@ -1301,20 +1542,54 @@ function OwnerDashboardView({
                         <p className="text-xl font-black text-white">{orgHealth}<span className="text-[10px] text-slate-500">/100</span></p>
                         <p className="text-[9px] text-emerald-400 font-bold mt-0.5">↑ 4.2%</p>
                     </div>
-                    <Sparkline data={[75, 78, 80, 84, 82, 88, 92, orgHealth]} color="#10b981" />
+                    <Sparkline data={dailyMetrics.length > 0 ? dailyMetrics.map(d => d.organizationHealth) : null} color="#10b981" />
                 </div>
 
-                {/* Revenue Impact */}
+                {/* Pipeline Covered KPI */}
                 <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
                     <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Revenue Impact</span>
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Pipeline Covered</span>
                         <DollarSign size={12} className="text-violet-400" />
                     </div>
-                    <div className="my-2">
-                        <p className="text-xl font-black text-white">$142.8K</p>
-                        <p className="text-[9px] text-violet-300 font-bold mt-0.5">↑ 12% Pipeline</p>
+                    <div className="my-2 flex-1 flex flex-col justify-center">
+                        {pipelineLoading ? (
+                            <p className="text-xs text-slate-500 animate-pulse">Loading...</p>
+                        ) : !pipelineData || (pipelineData.openDealCount === 0 && pipelineData.wonDealCount === 0 && pipelineData.lostDealCount === 0) ? (
+                            <div className="space-y-1 mt-1">
+                                <p className="text-xs font-bold text-slate-400">No pipeline data yet</p>
+                                <p className="text-[9px] text-slate-500 leading-tight">Add deal values to analyzed calls to start tracking.</p>
+                            </div>
+                        ) : pipelineData.openDealCount === 0 ? (
+                            <div className="space-y-1">
+                                <p className="text-xs font-bold text-slate-400">No open pipeline</p>
+                                {pipelineData.wonDealCount > 0 && (
+                                    <div>
+                                        <p className="text-lg font-black text-emerald-400">
+                                            {formatCurrency(pipelineData.closedWon)}
+                                        </p>
+                                        <p className="text-[9px] text-emerald-300 font-bold mt-0.5">
+                                            {pipelineData.wonDealCount} Closed Won Deal{pipelineData.wonDealCount > 1 ? "s" : ""}
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div>
+                                <p className="text-xl font-black text-white">
+                                    {formatCurrency(pipelineData.pipelineCovered)}
+                                </p>
+                                <p className="text-[9px] text-violet-300 font-bold mt-0.5">
+                                    {pipelineData.openDealCount} Open Deal{pipelineData.openDealCount > 1 ? "s" : ""}
+                                </p>
+                                {pipelineData.wonDealCount > 0 && (
+                                    <p className="text-[9px] text-emerald-400 font-bold mt-0.5">
+                                        Closed Won: {formatCurrency(pipelineData.closedWon)} ({pipelineData.wonDealCount} Won)
+                                    </p>
+                                )}
+                            </div>
+                        )}
                     </div>
-                    <Sparkline data={[110, 115, 120, 128, 132, 138, 142.8]} color="#8b5cf6" />
+                    <Sparkline data={pipelineData && pipelineData.openDealCount > 0 ? [0, Number(pipelineData.pipelineCovered)] : pipelineData && pipelineData.wonDealCount > 0 ? [0, Number(pipelineData.closedWon)] : null} color="#8b5cf6" />
                 </div>
 
                 {/* Average QA */}
@@ -1327,7 +1602,7 @@ function OwnerDashboardView({
                         <p className="text-xl font-black text-white">{avgScore}</p>
                         <p className="text-[9px] text-blue-300 font-bold mt-0.5">Grade A</p>
                     </div>
-                    <Sparkline data={[78, 80, 81, 83, 82, 85, 84, Number(avgScore)]} color="#3b82f6" />
+                    <Sparkline data={dailyMetrics.length > 0 ? dailyMetrics.map(d => d.avgQaScore) : null} color="#3b82f6" />
                 </div>
 
                 {/* Risk Flags */}
@@ -1337,10 +1612,12 @@ function OwnerDashboardView({
                         <ShieldAlert size={12} className="text-amber-400" />
                     </div>
                     <div className="my-2">
-                        <p className="text-xl font-black text-amber-400">{companyStats?.coachingNeededCount || 2}</p>
-                        <p className="text-[9px] text-emerald-400 font-bold mt-0.5">↓ 50% vs last wk</p>
+                        <p className="text-xl font-black text-amber-400">{companyStats?.riskFlagsCount ?? companyStats?.coachingNeededCount ?? 0}</p>
+                        <p className="text-[9px] text-emerald-400 font-bold mt-0.5">
+                            {(companyStats?.coachingNeededCount || 0) > 0 ? `${companyStats.coachingNeededCount} Rep${companyStats.coachingNeededCount > 1 ? "s" : ""} need coaching` : "0 At-Risk Reps"}
+                        </p>
                     </div>
-                    <Sparkline data={[8, 6, 5, 4, 3, 3, 2]} color="#f59e0b" />
+                    <Sparkline data={dailyMetrics.length > 0 ? dailyMetrics.map(d => d.coachingNeeded) : null} color="#f59e0b" />
                 </div>
 
                 {/* Active Members */}
@@ -1353,7 +1630,7 @@ function OwnerDashboardView({
                         <p className="text-xl font-black text-white">{activeSeats}</p>
                         <p className="text-[9px] text-purple-300 font-bold mt-0.5">Active Reps</p>
                     </div>
-                    <Sparkline data={[4, 4, 5, 5, 6, 6, activeSeats]} color="#a78bfa" />
+                    <Sparkline data={null} color="#a78bfa" />
                 </div>
 
                 {/* Seat Utilization */}
@@ -1366,7 +1643,7 @@ function OwnerDashboardView({
                         <p className="text-xl font-black text-white">{seatPct}%</p>
                         <p className="text-[9px] text-slate-400 font-medium mt-0.5">{activeSeats}/{seatLimit} Seats</p>
                     </div>
-                    <Sparkline data={[40, 50, 60, 65, 70, 78, seatPct]} color="#6366f1" />
+                    <Sparkline data={null} color="#6366f1" />
                 </div>
 
                 {/* AI Success */}
@@ -1376,23 +1653,112 @@ function OwnerDashboardView({
                         <Cpu size={12} className="text-cyan-400" />
                     </div>
                     <div className="my-2">
-                        <p className="text-xl font-black text-white">99.8%</p>
-                        <p className="text-[9px] text-cyan-300 font-bold mt-0.5">Optimal Uptime</p>
+                        <p className="text-xl font-black text-white">100%</p>
+                        <p className="text-[9px] text-cyan-300 font-bold mt-0.5">Pipeline Active</p>
                     </div>
-                    <Sparkline data={[99.2, 99.4, 99.5, 99.7, 99.8, 99.8]} color="#06b6d4" />
+                    <Sparkline data={null} color="#06b6d4" />
                 </div>
 
-                {/* Storage Usage */}
+                {/* ── MEDIA LIBRARY ─────────────────────────────────────────────────────── */}
+                {/* Replaces hardcoded "Storage Usage 4.2 GB of 50 GB" — all values are     */}
+                {/* derived from real call_records metadata, never from Cloudinary Admin API */}
                 <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
                     <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Storage Usage</span>
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Media Library</span>
                         <HardDrive size={12} className="text-emerald-400" />
                     </div>
-                    <div className="my-2">
-                        <p className="text-xl font-black text-white">4.2 GB</p>
-                        <p className="text-[9px] text-slate-400 font-medium mt-0.5">of 50 GB Limit</p>
-                    </div>
-                    <Sparkline data={[2.1, 2.5, 3.0, 3.4, 3.8, 4.2]} color="#10b981" />
+
+                    {/* Loading skeleton */}
+                    {mediaLibraryLoading && (
+                        <div className="my-2 space-y-1.5">
+                            <div className="h-6 w-10 rounded-md animate-pulse" style={{ background: "rgba(255,255,255,0.08)" }} />
+                            <div className="h-2.5 w-20 rounded animate-pulse" style={{ background: "rgba(255,255,255,0.05)" }} />
+                            <div className="h-2 w-24 rounded animate-pulse mt-1" style={{ background: "rgba(255,255,255,0.04)" }} />
+                        </div>
+                    )}
+
+                    {/* Error state */}
+                    {!mediaLibraryLoading && mediaLibraryError && (
+                        <div className="my-2">
+                            <p className="text-[10px] text-red-400 font-medium">Unable to load</p>
+                            <button
+                                onClick={() => {
+                                    setMediaLibraryError(false);
+                                    setMediaLibraryLoading(true);
+                                    api.get("/api/company/media-library")
+                                        .then(res => { setMediaLibrary(res.data); setMediaLibraryLoading(false); })
+                                        .catch(() => { setMediaLibraryError(true); setMediaLibraryLoading(false); });
+                                }}
+                                className="text-[9px] text-violet-400 hover:text-violet-300 font-bold mt-1 transition-colors"
+                            >
+                                Retry
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Empty state */}
+                    {!mediaLibraryLoading && !mediaLibraryError && mediaLibrary && mediaLibrary.recordingCount === 0 && (
+                        <div className="my-2">
+                            <p className="text-xl font-black text-white">0</p>
+                            <p className="text-[9px] text-slate-500 font-medium mt-0.5">No recordings yet</p>
+                        </div>
+                    )}
+
+                    {/* Data state */}
+                    {!mediaLibraryLoading && !mediaLibraryError && mediaLibrary && mediaLibrary.recordingCount > 0 && (() => {
+                        const count      = mediaLibrary.recordingCount;
+                        const tracked    = mediaLibrary.trackedFileCount;
+                        const bytes      = mediaLibrary.trackedStorageBytes;
+                        const unknown    = mediaLibrary.unknownFileSizeCount;
+                        const lastUpload = mediaLibrary.lastUploadAt;
+
+                        // Format bytes into human-readable string
+                        const fmtBytes = (b) => {
+                            if (!b || b === 0) return "0 B";
+                            const units = ["B", "KB", "MB", "GB", "TB"];
+                            const i = Math.floor(Math.log(b) / Math.log(1024));
+                            return `${(b / Math.pow(1024, i)).toFixed(2)} ${units[i]}`;
+                        };
+
+                        // Relative time helper
+                        const relTime = (isoStr) => {
+                            if (!isoStr) return null;
+                            const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
+                            if (diff < 60)   return "just now";
+                            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+                            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+                            return `${Math.floor(diff / 86400)}d ago`;
+                        };
+
+                        return (
+                            <div className="my-2">
+                                <p className="text-xl font-black text-white">{count.toLocaleString()}</p>
+                                <p className="text-[9px] text-emerald-400 font-bold mt-0.5">Recording{count !== 1 ? "s" : ""}</p>
+
+                                {/* Storage info */}
+                                {tracked > 0 ? (
+                                    <p className="text-[9px] text-slate-400 font-medium mt-1.5">
+                                        {fmtBytes(bytes)} tracked
+                                        {unknown > 0 && ` · ${unknown} without size`}
+                                    </p>
+                                ) : (
+                                    <p className="text-[9px] text-slate-500 font-medium mt-1.5">
+                                        Size unavailable for existing recordings
+                                    </p>
+                                )}
+
+                                {/* Last upload */}
+                                {lastUpload && (
+                                    <p className="text-[9px] text-slate-500 mt-0.5">
+                                        Last upload · {relTime(lastUpload)}
+                                    </p>
+                                )}
+                            </div>
+                        );
+                    })()}
+
+                    {/* No sparkline — upload frequency has no guaranteed trend */}
+                    <div style={{ height: 20 }} />
                 </div>
             </div>
 
@@ -1404,7 +1770,7 @@ function OwnerDashboardView({
                             <TrendingUp size={18} className="text-violet-400" />
                             <h3 className="text-base font-black text-white">Revenue & Quality Trend Intelligence</h3>
                         </div>
-                        <p className="text-xs text-slate-400 mt-0.5">30-day performance velocity across call volume, QA score, and customer sentiment</p>
+                        <p className="text-xs text-slate-400 mt-0.5">{rangeLabel} performance velocity across call volume, QA score, and customer sentiment</p>
                     </div>
 
                     {/* Metric Tabs */}
@@ -1426,55 +1792,103 @@ function OwnerDashboardView({
 
                 {/* Recharts Area Chart */}
                 <div className="h-72 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={trendChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                            <defs>
-                                <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor={chartMetric === "volume" ? "#8b5cf6" : chartMetric === "qa" ? "#3b82f6" : "#10b981"} stopOpacity={0.4} />
-                                    <stop offset="95%" stopColor={chartMetric === "volume" ? "#8b5cf6" : chartMetric === "qa" ? "#3b82f6" : "#10b981"} stopOpacity={0} />
-                                </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                            <XAxis dataKey="date" stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 11 }} />
-                            <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 11 }} />
-                            <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "rgba(255,255,255,0.15)", borderRadius: "12px", color: "#fff", fontSize: "12px" }} />
-                            <Area
-                                type="monotone"
-                                dataKey={chartMetric === "volume" ? "Volume" : chartMetric === "qa" ? "QA" : "Sentiment"}
-                                stroke={chartMetric === "volume" ? "#8b5cf6" : chartMetric === "qa" ? "#3b82f6" : "#10b981"}
-                                strokeWidth={3}
-                                fillOpacity={1}
-                                fill="url(#chartGrad)"
-                            />
-                        </AreaChart>
-                    </ResponsiveContainer>
+                    {trendChartData.length === 0 ? (
+                        <div className="h-full flex flex-col items-center justify-center text-center p-6">
+                            <p className="text-sm font-bold text-slate-400">No trend data available for this range</p>
+                            <p className="text-xs text-slate-500 mt-1">Upload call recordings to begin tracking historical performance.</p>
+                        </div>
+                    ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={trendChartData} margin={{ top: 16, right: 16, left: -16, bottom: 8 }}>
+                                <defs>
+                                    <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor={chartMetric === "volume" ? "#8b5cf6" : chartMetric === "qa" ? "#3b82f6" : "#10b981"} stopOpacity={0.35} />
+                                        <stop offset="95%" stopColor={chartMetric === "volume" ? "#8b5cf6" : chartMetric === "qa" ? "#3b82f6" : "#10b981"} stopOpacity={0.0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                                <XAxis
+                                    dataKey="date"
+                                    ticks={optimalDateTicks}
+                                    interval={0}
+                                    stroke="rgba(255,255,255,0.08)"
+                                    tickLine={false}
+                                    axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                                    tick={{ fontSize: 11, fill: "#94a3b8", fontWeight: 500 }}
+                                    dy={8}
+                                />
+                                <YAxis
+                                    stroke="rgba(255,255,255,0.08)"
+                                    tickLine={false}
+                                    axisLine={false}
+                                    tick={{ fontSize: 11, fill: "#64748b", fontWeight: 500 }}
+                                    dx={-4}
+                                />
+                                <Tooltip
+                                    cursor={{ stroke: "rgba(255,255,255,0.12)", strokeDasharray: "4 4", strokeWidth: 1 }}
+                                    content={({ active, payload, label }) => {
+                                        if (!active || !payload || !payload.length) return null;
+                                        const item = payload[0];
+                                        const val = item.value;
+                                        const metricName = chartMetric === "volume" ? "Call Volume" : chartMetric === "qa" ? "Avg QA Score" : "Positive Sentiment";
+                                        const unit = chartMetric === "volume" ? "calls" : chartMetric === "qa" ? "/ 100" : "%";
+                                        const color = chartMetric === "volume" ? "#8b5cf6" : chartMetric === "qa" ? "#3b82f6" : "#10b981";
+                                        return (
+                                            <div className="px-3.5 py-2.5 rounded-xl border backdrop-blur-xl shadow-2xl"
+                                                style={{
+                                                    backgroundColor: "rgba(11, 15, 25, 0.95)",
+                                                    borderColor: "rgba(255, 255, 255, 0.12)",
+                                                    boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 0 15px rgba(139, 92, 246, 0.1)"
+                                                }}>
+                                                <p className="text-[11px] font-bold text-slate-400 mb-1.5">{label}</p>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
+                                                    <span className="text-xs text-slate-300 font-medium">{metricName}:</span>
+                                                    <span className="text-xs font-black text-white">{val} <span className="text-[10px] font-normal text-slate-400">{unit}</span></span>
+                                                </div>
+                                            </div>
+                                        );
+                                    }}
+                                />
+                                <Area
+                                    type="monotone"
+                                    dataKey={chartMetric === "volume" ? "Volume" : chartMetric === "qa" ? "QA" : "Sentiment"}
+                                    stroke={chartMetric === "volume" ? "#8b5cf6" : chartMetric === "qa" ? "#3b82f6" : "#10b981"}
+                                    strokeWidth={2.5}
+                                    fillOpacity={1}
+                                    fill="url(#chartGrad)"
+                                    activeDot={{ r: 5, fill: chartMetric === "volume" ? "#8b5cf6" : chartMetric === "qa" ? "#3b82f6" : "#10b981", stroke: "#fff", strokeWidth: 2 }}
+                                />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    )}
                 </div>
 
                 {/* Hero Stats Footer */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 mt-4 border-t border-white/10 text-xs">
                     <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-300 font-bold">
-                            📞
+                            <Phone size={14} />
                         </div>
                         <div>
                             <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Total Calls Analysed</span>
-                            <p className="text-sm font-black text-white">{totalCalls} Conversations</p>
+                            <p className="text-sm font-black text-white">{companyStats?.totalCalls ?? totalCalls} Conversations</p>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-300 font-bold">
-                            ⭐
+                            <Star size={14} />
                         </div>
                         <div>
-                            <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">30-Day Avg QA Standard</span>
+                            <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">{rangeLabel.toUpperCase()} Avg QA Standard</span>
                             <p className="text-sm font-black text-white">{avgScore} / 100 Grade A</p>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-300 font-bold">
-                            😊
+                            <Smile size={14} />
                         </div>
                         <div>
                             <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Positive Sentiment Ratio</span>
@@ -1509,30 +1923,38 @@ function OwnerDashboardView({
                     </div>
 
                     <div className="space-y-2.5">
-                        {filteredAlerts.map(a => (
-                            <div key={a.id} className="p-3.5 rounded-xl border flex items-start justify-between gap-3 transition-all hover:bg-white/5"
-                                style={{ background: a.bg, borderColor: a.border }}>
-                                <div className="flex items-start gap-3 min-w-0">
-                                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
-                                        style={{ background: `${a.color}25`, border: `1px solid ${a.color}55` }}>
-                                        <a.icon size={15} style={{ color: a.color }} />
-                                    </div>
-                                    <div className="min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <p className="text-xs font-bold text-white truncate">{a.title}</p>
-                                            <span className="text-[9px] font-semibold text-slate-400 flex-shrink-0">{a.time}</span>
-                                        </div>
-                                        <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">{a.description}</p>
-                                    </div>
-                                </div>
-
-                                <Link to={a.link}
-                                    className="px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex-shrink-0 transition-colors inline-flex items-center gap-1"
-                                    style={{ background: `${a.color}20`, color: a.color, border: `1px solid ${a.color}40` }}>
-                                    {a.actionLabel} <ArrowUpRight size={10} />
-                                </Link>
+                        {filteredAlerts.length === 0 ? (
+                            <div className="p-6 rounded-xl border border-dashed border-white/10 text-center text-slate-400 text-xs">
+                                <ShieldCheck size={24} className="mx-auto mb-2 text-emerald-400/70" />
+                                <p className="font-semibold text-slate-300">All systems healthy</p>
+                                <p className="text-[11px] text-slate-500 mt-0.5">No {alertFilter !== "all" ? alertFilter : "active"} risk alerts detected for this time window.</p>
                             </div>
-                        ))}
+                        ) : (
+                            filteredAlerts.map(a => (
+                                <div key={a.id} className="p-3.5 rounded-xl border flex items-start justify-between gap-3 transition-all hover:bg-white/5"
+                                    style={{ background: a.bg, borderColor: a.border }}>
+                                    <div className="flex items-start gap-3 min-w-0">
+                                        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+                                            style={{ background: `${a.color}25`, border: `1px solid ${a.color}55` }}>
+                                            <a.icon size={15} style={{ color: a.color }} />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <p className="text-xs font-bold text-white truncate">{a.title}</p>
+                                                <span className="text-[9px] font-semibold text-slate-400 flex-shrink-0">{a.time}</span>
+                                            </div>
+                                            <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">{a.description}</p>
+                                        </div>
+                                    </div>
+
+                                    <Link to={a.link}
+                                        className="px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex-shrink-0 transition-colors inline-flex items-center gap-1"
+                                        style={{ background: `${a.color}20`, color: a.color, border: `1px solid ${a.color}40` }}>
+                                        {a.actionLabel} <ArrowUpRight size={10} />
+                                    </Link>
+                                </div>
+                            ))
+                        )}
                     </div>
                 </Panel>
 
@@ -1544,7 +1966,7 @@ function OwnerDashboardView({
                                 <Crown size={16} className="text-amber-400" />
                                 <h3 className="text-sm font-bold text-white">Executive Team Insights</h3>
                             </div>
-                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">30-Day Window</span>
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{rangeLabel} Window</span>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -1553,8 +1975,8 @@ function OwnerDashboardView({
                                 <span className="text-[9px] font-bold uppercase text-amber-400 tracking-wider flex items-center gap-1 mb-1">
                                     <Crown size={10} /> Top Performer
                                 </span>
-                                <p className="font-bold text-white text-sm">{topInsights.topPerformer.employeeName}</p>
-                                <p className="text-[10px] text-amber-300/80 mt-0.5">{topInsights.topPerformer.avgScore?.toFixed(1)} QA Avg · {topInsights.topPerformer.callCount} Calls</p>
+                                <p className="font-bold text-white text-sm truncate">{topInsights.topPerformer?.employeeName || "No Data"}</p>
+                                <p className="text-[10px] text-amber-300/80 mt-0.5">{topInsights.topPerformer?.statusText || "No conversations in period"}</p>
                             </div>
 
                             {/* Needs Coaching */}
@@ -1562,8 +1984,8 @@ function OwnerDashboardView({
                                 <span className="text-[9px] font-bold uppercase text-rose-400 tracking-wider flex items-center gap-1 mb-1">
                                     <AlertTriangle size={10} /> Needs Coaching
                                 </span>
-                                <p className="font-bold text-white text-sm">{topInsights.needsCoaching.employeeName}</p>
-                                <p className="text-[10px] text-rose-300/80 mt-0.5">Focus: {topInsights.needsCoaching.primaryWeakness || "Objection Handling"}</p>
+                                <p className="font-bold text-white text-sm truncate">{topInsights.needsCoaching?.employeeName || "All Reps On Track"}</p>
+                                <p className="text-[10px] text-rose-300/80 mt-0.5">{topInsights.needsCoaching?.statusText || "Quality standards met"}</p>
                             </div>
 
                             {/* Most Improved */}
@@ -1571,8 +1993,8 @@ function OwnerDashboardView({
                                 <span className="text-[9px] font-bold uppercase text-emerald-400 tracking-wider flex items-center gap-1 mb-1">
                                     <TrendingUp size={10} /> Most Improved
                                 </span>
-                                <p className="font-bold text-white text-sm">{topInsights.mostImproved.employeeName}</p>
-                                <p className="text-[10px] text-emerald-300/80 mt-0.5">{topInsights.mostImproved.delta} Score Increase</p>
+                                <p className="font-bold text-white text-sm truncate">{topInsights.mostImproved?.employeeName || "Baseline Establishing"}</p>
+                                <p className="text-[10px] text-emerald-300/80 mt-0.5">{topInsights.mostImproved?.statusText || "No prior comparison"}</p>
                             </div>
 
                             {/* Highest Call Volume */}
@@ -1580,8 +2002,8 @@ function OwnerDashboardView({
                                 <span className="text-[9px] font-bold uppercase text-violet-400 tracking-wider flex items-center gap-1 mb-1">
                                     <Phone size={10} /> Highest Call Volume
                                 </span>
-                                <p className="font-bold text-white text-sm">{topInsights.highestVolume.employeeName}</p>
-                                <p className="text-[10px] text-violet-300/80 mt-0.5">{topInsights.highestVolume.count} Conversations Analysed</p>
+                                <p className="font-bold text-white text-sm truncate">{topInsights.highestVolume?.employeeName || (topPerformers[0]?.employeeName ?? "No Data")}</p>
+                                <p className="text-[10px] text-violet-300/80 mt-0.5">{topInsights.highestVolume?.statusText || (topPerformers[0] ? `${topPerformers[0].callCount} Conversations` : "0 conversations")}</p>
                             </div>
 
                             {/* Best QA Score */}
@@ -1589,8 +2011,8 @@ function OwnerDashboardView({
                                 <span className="text-[9px] font-bold uppercase text-blue-400 tracking-wider flex items-center gap-1 mb-1">
                                     <Star size={10} /> Best QA Score
                                 </span>
-                                <p className="font-bold text-white text-sm">{topInsights.bestQA.employeeName}</p>
-                                <p className="text-[10px] text-blue-300/80 mt-0.5">{topInsights.bestQA.score} / 100 Perfect Score</p>
+                                <p className="font-bold text-white text-sm truncate">{topInsights.bestQA?.employeeName || (topPerformers[0]?.employeeName ?? "No Data")}</p>
+                                <p className="text-[10px] text-blue-300/80 mt-0.5">{topInsights.bestQA?.statusText || (topPerformers[0] ? `${topPerformers[0].avgScore?.toFixed(1)} / 100 Top Score` : "No scored calls")}</p>
                             </div>
 
                             {/* Highest Positive Sentiment */}
@@ -1598,8 +2020,8 @@ function OwnerDashboardView({
                                 <span className="text-[9px] font-bold uppercase text-cyan-400 tracking-wider flex items-center gap-1 mb-1">
                                     <Smile size={10} /> Best Sentiment
                                 </span>
-                                <p className="font-bold text-white text-sm">{topInsights.highestSentiment.employeeName}</p>
-                                <p className="text-[10px] text-cyan-300/80 mt-0.5">{topInsights.highestSentiment.posRatio}</p>
+                                <p className="font-bold text-white text-sm truncate">{topInsights.highestSentiment?.employeeName || (topPerformers[0]?.employeeName ?? "No Data")}</p>
+                                <p className="text-[10px] text-cyan-300/80 mt-0.5">{topInsights.highestSentiment?.posRatio || (posPct > 0 ? `${posPct}% Positive Ratio` : "No sentiment data")}</p>
                             </div>
                         </div>
                     </div>
@@ -1727,12 +2149,9 @@ export default function DashboardPage() {
     const [toast, setToast] = useState(null);
     const [playingId, setPlayingId] = useState(null);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const [dateRange, setDateRange] = useState("30d");
 
-    /* ── Server-computed KPIs from GET /api/dashboard/employee. This
-       replaces the client-side average/percentage/trend/recommendation
-       math that used to live entirely in this file — see fetchDashboardStats
-       below. `calls` (from /api/calls/my-calls) is still fetched separately
-       and still drives Recent Calls, Search, and the filter popover. ───── */
+    /* ── Server-computed KPIs from GET /api/dashboard/employee. ────── */
     const [dashboardStats, setDashboardStats] = useState(null);
     const [dashboardLoading, setDashboardLoading] = useState(true);
     const [dashboardError, setDashboardError] = useState(null);
@@ -1740,10 +2159,10 @@ export default function DashboardPage() {
     const [companyStats, setCompanyStats] = useState(null);
     const [membersData, setMembersData] = useState(null);
 
-    const fetchOwnerData = useCallback(async () => {
+    const fetchOwnerData = useCallback(async (range = dateRange) => {
         try {
             const [statsRes, membersRes] = await Promise.allSettled([
-                api.get("/api/company/stats?range=30d"),
+                api.get(`/api/company/stats?range=${range}`),
                 api.get("/api/company/members")
             ]);
             if (statsRes.status === "fulfilled") setCompanyStats(statsRes.value.data);
@@ -1751,7 +2170,7 @@ export default function DashboardPage() {
         } catch (err) {
             console.error("Failed to load owner executive stats:", err);
         }
-    }, []);
+    }, [dateRange]);
 
     const { currentWorkspace } = useWorkspace();
     const storedUser = getUser();
@@ -1767,15 +2186,14 @@ export default function DashboardPage() {
 
     useEffect(() => {
         if (user?.role === "OWNER") {
-            fetchOwnerData();
+            fetchOwnerData(dateRange);
         }
-    }, [user?.role, fetchOwnerData]);
+    }, [user?.role, dateRange, fetchOwnerData]);
 
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [searchOpen, setSearchOpen] = useState(false);
     const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
-    const [dateRange, setDateRange] = useState("30d");
 
     const [filterOpen, setFilterOpen] = useState(false);
     const [filters, setFilters] = useState({
@@ -2134,9 +2552,9 @@ export default function DashboardPage() {
     ];
 
     const RISK_CFG = {
-        high:   { color: "#ef4444", bg: "rgba(239,68,68,0.1)",  border: "rgba(239,68,68,0.28)",  label: "High",   Icon: AlertOctagon },
+        high: { color: "#ef4444", bg: "rgba(239,68,68,0.1)", border: "rgba(239,68,68,0.28)", label: "High", Icon: AlertOctagon },
         medium: { color: "#f59e0b", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.28)", label: "Medium", Icon: AlertTriangle },
-        low:    { color: "#3b82f6", bg: "rgba(59,130,246,0.1)", border: "rgba(59,130,246,0.28)", label: "Low",    Icon: Info },
+        low: { color: "#3b82f6", bg: "rgba(59,130,246,0.1)", border: "rgba(59,130,246,0.28)", label: "Low", Icon: Info },
     };
 
     const MEDALS = ["#fbbf24", "#94a3b8", "#c2703d", "#64748b"];
@@ -2581,277 +2999,278 @@ export default function DashboardPage() {
                             }}
                             onManageMembers={() => navigate(`/w/${companySlug}/company/members`)}
                             companySlug={companySlug}
+                            dateRange={dateRange}
                         />
                     ) : (
                         <>
-                        <div className="space-y-5">
+                            <div className="space-y-5">
 
-                            {/* AI Briefing — the hero. This is the one thing on
+                                {/* AI Briefing — the hero. This is the one thing on
                                 Dashboard that does real "so what" synthesis, so
                                 it leads the page full-width instead of sharing
                                 a side column with 3 other panels. */}
-                            <div className="relative overflow-hidden rounded-2xl p-6"
-                                style={{ background: "linear-gradient(160deg, rgba(124,58,237,0.18) 0%, rgba(37,99,235,0.1) 100%)", border: "1px solid rgba(139,92,246,0.28)" }}>
-                                <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full opacity-20 blur-3xl pointer-events-none" style={{ background: "radial-gradient(circle, #8b5cf6, transparent)" }} />
-                                <div className="relative grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                    <div className="lg:col-span-2">
-                                        <div className="flex items-center justify-between mb-4">
-                                            <div className="flex items-center gap-2">
-                                                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "rgba(139,92,246,0.25)", border: "1px solid rgba(139,92,246,0.4)" }}>
-                                                    <Sparkles size={13} className="text-violet-200" />
+                                <div className="relative overflow-hidden rounded-2xl p-6"
+                                    style={{ background: "linear-gradient(160deg, rgba(124,58,237,0.18) 0%, rgba(37,99,235,0.1) 100%)", border: "1px solid rgba(139,92,246,0.28)" }}>
+                                    <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full opacity-20 blur-3xl pointer-events-none" style={{ background: "radial-gradient(circle, #8b5cf6, transparent)" }} />
+                                    <div className="relative grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                        <div className="lg:col-span-2">
+                                            <div className="flex items-center justify-between mb-4">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "rgba(139,92,246,0.25)", border: "1px solid rgba(139,92,246,0.4)" }}>
+                                                        <Sparkles size={13} className="text-violet-200" />
+                                                    </div>
+                                                    <span className="text-sm font-bold text-white">Today's AI Briefing</span>
                                                 </div>
-                                                <span className="text-sm font-bold text-white">Today's AI Briefing</span>
+                                                <LivePulse label="Live" />
                                             </div>
-                                            <LivePulse label="Live" />
+
+                                            <p className="text-[0.95rem] leading-relaxed mb-4" style={{ color: "rgba(255,255,255,0.88)" }}>
+                                                {(loading || dashboardLoading) ? "Pulling together your latest conversation data…" : briefing}
+                                            </p>
+
+                                            {!loading && !dashboardLoading && (
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                    {recommendations.map((r, i) => (
+                                                        <div key={i} className="flex items-start gap-2.5 p-2.5 rounded-xl" style={{ background: "rgba(0,0,0,0.18)" }}>
+                                                            <r.Icon size={14} className="mt-0.5 flex-shrink-0" style={{ color: r.color }} />
+                                                            <span className="text-xs leading-relaxed" style={{ color: "rgba(255,255,255,0.8)" }}>{r.text}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
 
-                                        <p className="text-[0.95rem] leading-relaxed mb-4" style={{ color: "rgba(255,255,255,0.88)" }}>
-                                            {(loading || dashboardLoading) ? "Pulling together your latest conversation data…" : briefing}
-                                        </p>
-
-                                        {!loading && !dashboardLoading && (
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                                {recommendations.map((r, i) => (
-                                                    <div key={i} className="flex items-start gap-2.5 p-2.5 rounded-xl" style={{ background: "rgba(0,0,0,0.18)" }}>
-                                                        <r.Icon size={14} className="mt-0.5 flex-shrink-0" style={{ color: r.color }} />
-                                                        <span className="text-xs leading-relaxed" style={{ color: "rgba(255,255,255,0.8)" }}>{r.text}</span>
-                                                    </div>
-                                                ))}
+                                        {/* Confidence + CTA — its own column now that there's room */}
+                                        <div className="flex lg:flex-col items-center lg:items-stretch justify-between gap-4 lg:border-l lg:pl-6" style={{ borderColor: "rgba(255,255,255,0.12)" }}>
+                                            <div className="text-center lg:text-left">
+                                                <p className="text-[10px] font-medium uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.5)" }}>Confidence</p>
+                                                <p className="text-3xl font-black text-white">{totalCalls > 0 ? "92%" : "–"}</p>
                                             </div>
+                                            <Link to="/analytics" className="inline-flex items-center justify-center gap-1.5 text-xs font-bold text-white px-4 py-2.5 rounded-xl hover:gap-2 transition-all flex-shrink-0"
+                                                style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)" }}>
+                                                View Full Report <ArrowRight size={12} />
+                                            </Link>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Today's snapshot */}
+                                <div>
+                                    <div className="mb-2.5">
+                                        <SectionLabel T={T} icon={Gauge} tone="#a1a1aa">Today's Snapshot</SectionLabel>
+                                    </div>
+                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+                                        {(loading || dashboardLoading) ? (
+                                            Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} T={T} className="h-24" />)
+                                        ) : (
+                                            <>
+                                                <KPICard T={T} label="Total Calls" value={statsTotalCalls} Icon={Phone} accent="#8b5cf6"
+                                                    series={callsSeries} trendPct={seriesTrend(callsSeries)} sub={`${dateRange === "all" ? "all time" : dateRange === "7d" ? "last 7 days" : "last 30 days"}`} compact />
+                                                <KPICard T={T} label="Avg QA Score" value={avgScore} Icon={Star} accent="#3b82f6"
+                                                    series={scoreSeries} trendPct={seriesTrend(scoreSeries)}
+                                                    sub={Number(avgScore) >= 70 ? "Good" : Number(avgScore) >= 50 ? "Fair" : "Needs focus"} compact />
+                                                <KPICard T={T} label="Positive Sentiment" value={`${positivePercent}%`} Icon={TrendingUp} accent="#10b981"
+                                                    series={positiveSeries} trendPct={seriesTrend(positiveSeries)} sub={`${positiveCalls} of ${statsTotalCalls} calls`} compact />
+                                                <KPICard T={T} label="Customer Satisfaction" value={dashboardStats?.avgCustomerSatisfaction || "–"} Icon={Award} accent="#f59e0b"
+                                                    series={csatSeries} trendPct={seriesTrend(csatSeries)} sub="avg score /100" compact />
+                                            </>
                                         )}
                                     </div>
+                                </div>
 
-                                    {/* Confidence + CTA — its own column now that there's room */}
-                                    <div className="flex lg:flex-col items-center lg:items-stretch justify-between gap-4 lg:border-l lg:pl-6" style={{ borderColor: "rgba(255,255,255,0.12)" }}>
-                                        <div className="text-center lg:text-left">
-                                            <p className="text-[10px] font-medium uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.5)" }}>Confidence</p>
-                                            <p className="text-3xl font-black text-white">{totalCalls > 0 ? "92%" : "–"}</p>
-                                        </div>
-                                        <Link to="/analytics" className="inline-flex items-center justify-center gap-1.5 text-xs font-bold text-white px-4 py-2.5 rounded-xl hover:gap-2 transition-all flex-shrink-0"
-                                            style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)" }}>
-                                            View Full Report <ArrowRight size={12} />
-                                        </Link>
+                                {/* Call Outcomes & Deal Intelligence */}
+                                <div>
+                                    <div className="mb-2.5 flex items-center justify-between">
+                                        <SectionLabel T={T} icon={Target} tone="#8b5cf6">Call Outcomes & Deal Intelligence</SectionLabel>
+                                        {filters.outcomeStatus !== "all" && (
+                                            <button onClick={() => setFilters(f => ({ ...f, outcomeStatus: "all" }))}
+                                                className="text-[11px] text-violet-400 hover:text-violet-300 font-bold transition-colors">
+                                                Clear Outcome Filter
+                                            </button>
+                                        )}
                                     </div>
-                                </div>
-                            </div>
-
-                            {/* Today's snapshot */}
-                            <div>
-                                <div className="mb-2.5">
-                                    <SectionLabel T={T} icon={Gauge} tone="#a1a1aa">Today's Snapshot</SectionLabel>
-                                </div>
-                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-                                    {(loading || dashboardLoading) ? (
-                                        Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} T={T} className="h-24" />)
-                                    ) : (
-                                        <>
-                                            <KPICard T={T} label="Total Calls" value={statsTotalCalls} Icon={Phone} accent="#8b5cf6"
-                                                series={callsSeries} trendPct={seriesTrend(callsSeries)} sub={`${dateRange === "all" ? "all time" : dateRange === "7d" ? "last 7 days" : "last 30 days"}`} compact />
-                                            <KPICard T={T} label="Avg QA Score" value={avgScore} Icon={Star} accent="#3b82f6"
-                                                series={scoreSeries} trendPct={seriesTrend(scoreSeries)}
-                                                sub={Number(avgScore) >= 70 ? "Good" : Number(avgScore) >= 50 ? "Fair" : "Needs focus"} compact />
-                                            <KPICard T={T} label="Positive Sentiment" value={`${positivePercent}%`} Icon={TrendingUp} accent="#10b981"
-                                                series={positiveSeries} trendPct={seriesTrend(positiveSeries)} sub={`${positiveCalls} of ${statsTotalCalls} calls`} compact />
-                                            <KPICard T={T} label="Customer Satisfaction" value={dashboardStats?.avgCustomerSatisfaction || "–"} Icon={Award} accent="#f59e0b"
-                                                series={csatSeries} trendPct={seriesTrend(csatSeries)} sub="avg score /100" compact />
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Call Outcomes & Deal Intelligence */}
-                            <div>
-                                <div className="mb-2.5 flex items-center justify-between">
-                                    <SectionLabel T={T} icon={Target} tone="#8b5cf6">Call Outcomes & Deal Intelligence</SectionLabel>
-                                    {filters.outcomeStatus !== "all" && (
-                                        <button onClick={() => setFilters(f => ({ ...f, outcomeStatus: "all" }))}
-                                            className="text-[11px] text-violet-400 hover:text-violet-300 font-bold transition-colors">
-                                            Clear Outcome Filter
-                                        </button>
-                                    )}
-                                </div>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                                    {[
-                                        { key: "Won", label: "Won / Closed", color: "#10b981", bg: "rgba(16,185,129,0.1)", border: "rgba(16,185,129,0.3)", icon: Trophy },
-                                        { key: "Follow Up Required", label: "Follow Up Required", color: "#f59e0b", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)", icon: RotateCcw },
-                                        { key: "Escalated", label: "Escalated", color: "#f97316", bg: "rgba(249,115,22,0.1)", border: "rgba(249,115,22,0.3)", icon: AlertTriangle },
-                                        { key: "Pending", label: "Pending", color: "#eab308", bg: "rgba(234,179,8,0.1)", border: "rgba(234,179,8,0.3)", icon: Hourglass },
-                                        { key: "Lost", label: "Lost", color: "#ef4444", bg: "rgba(239,68,68,0.1)", border: "rgba(239,68,68,0.3)", icon: XCircle },
-                                    ].map(item => {
-                                        const count = (dashboardStats?.outcomeDistribution?.[item.key] ?? 
-                                                       rangedCalls.filter(c => (c.outcomeStatus || c.outcome) === item.key).length) || 0;
-                                        const pctVal = statsTotalCalls > 0 ? Math.round((count / statsTotalCalls) * 100) : 0;
-                                        const isSelected = filters.outcomeStatus === item.key;
-                                        return (
-                                            <div key={item.key}
-                                                onClick={() => setFilters(f => ({ ...f, outcomeStatus: isSelected ? "all" : item.key }))}
-                                                className="p-3.5 rounded-xl border transition-all cursor-pointer group"
-                                                style={{
-                                                    background: isSelected ? item.bg : T.panel,
-                                                    borderColor: isSelected ? item.color : T.panelBorder,
-                                                    boxShadow: isSelected ? `0 0 16px ${item.color}33` : "none"
-                                                }}>
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <span className="p-1.5 rounded-lg flex items-center justify-center" style={{ background: item.bg, border: `1px solid ${item.border}` }}>
-                                                        <item.icon size={13} style={{ color: item.color }} />
-                                                    </span>
-                                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: T.textFaint }}>
-                                                        {pctVal}%
-                                                    </span>
-                                                </div>
-                                                <p className="text-xl font-black" style={{ color: T.text }}>{count}</p>
-                                                <p className="text-[11px] font-medium truncate mt-0.5" style={{ color: item.color }}>{item.label}</p>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-
-                            {/* Critical Alerts */}
-                            <Panel T={T} style={needsAttention.length > 0 ? { background: "rgba(239,68,68,0.035)", borderColor: "rgba(239,68,68,0.2)" } : {}}>
-                                <PanelHeader T={T}
-                                    title={<span className="flex items-center gap-2"><ShieldAlert size={15} className="text-red-400" /> Critical Alerts</span>}
-                                    sub={(loading || dashboardLoading) ? "Scanning conversations…" : dashboardError ? "Unable to load right now" : needsAttention.length > 0 ? `${needsAttention.length} conversation${needsAttention.length !== 1 ? "s" : ""} need review` : "Nothing needs your attention right now"}
-                                />
-                                {(loading || dashboardLoading) ? (
-                                    <div className="space-y-2"><Skeleton T={T} className="h-14" /><Skeleton T={T} className="h-14" /></div>
-                                ) : needsAttention.length === 0 ? (
-                                    <div className="flex items-center gap-3 py-6 justify-center" style={{ color: T.textFaint }}>
-                                        <CheckCircle size={18} className="text-emerald-400" />
-                                        <span className="text-sm">All clear — your team is performing well.</span>
-                                    </div>
-                                ) : (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                        {needsAttention.map(call => {
-                                            const risk = RISK_CFG[call.riskLevel];
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                                        {[
+                                            { key: "Won", label: "Won / Closed", color: "#10b981", bg: "rgba(16,185,129,0.1)", border: "rgba(16,185,129,0.3)", icon: Trophy },
+                                            { key: "Follow Up Required", label: "Follow Up Required", color: "#f59e0b", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)", icon: RotateCcw },
+                                            { key: "Escalated", label: "Escalated", color: "#f97316", bg: "rgba(249,115,22,0.1)", border: "rgba(249,115,22,0.3)", icon: AlertTriangle },
+                                            { key: "Pending", label: "Pending", color: "#eab308", bg: "rgba(234,179,8,0.1)", border: "rgba(234,179,8,0.3)", icon: Hourglass },
+                                            { key: "Lost", label: "Lost", color: "#ef4444", bg: "rgba(239,68,68,0.1)", border: "rgba(239,68,68,0.3)", icon: XCircle },
+                                        ].map(item => {
+                                            const count = (dashboardStats?.outcomeDistribution?.[item.key] ??
+                                                rangedCalls.filter(c => (c.outcomeStatus || c.outcome) === item.key).length) || 0;
+                                            const pctVal = statsTotalCalls > 0 ? Math.round((count / statsTotalCalls) * 100) : 0;
+                                            const isSelected = filters.outcomeStatus === item.key;
                                             return (
-                                                <Link key={call.id} to={`/w/${user?.companySlug || "default"}/calls/${call.id}`}
-                                                    className="flex items-center gap-3 p-3.5 rounded-xl transition-all group"
-                                                    style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}
-                                                    onMouseEnter={e => { e.currentTarget.style.borderColor = `${risk.color}55`; }}
-                                                    onMouseLeave={e => { e.currentTarget.style.borderColor = T.panelBorder; }}>
-                                                    <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: risk.bg, border: `1px solid ${risk.border}` }}>
-                                                        <risk.Icon size={16} style={{ color: risk.color }} />
+                                                <div key={item.key}
+                                                    onClick={() => setFilters(f => ({ ...f, outcomeStatus: isSelected ? "all" : item.key }))}
+                                                    className="p-3.5 rounded-xl border transition-all cursor-pointer group"
+                                                    style={{
+                                                        background: isSelected ? item.bg : T.panel,
+                                                        borderColor: isSelected ? item.color : T.panelBorder,
+                                                        boxShadow: isSelected ? `0 0 16px ${item.color}33` : "none"
+                                                    }}>
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="p-1.5 rounded-lg flex items-center justify-center" style={{ background: item.bg, border: `1px solid ${item.border}` }}>
+                                                            <item.icon size={13} style={{ color: item.color }} />
+                                                        </span>
+                                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: T.textFaint }}>
+                                                            {pctVal}%
+                                                        </span>
                                                     </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <p className="text-sm font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p>
-                                                        <p className="text-xs truncate" style={{ color: T.textFaint }}>
-                                                            {call.overallScore != null ? `Scored ${call.overallScore}/100` : "Negative sentiment"} · {timeAgo(call.createdAt)}
-                                                        </p>
-                                                    </div>
-                                                    <span className="text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0" style={{ background: risk.bg, color: risk.color }}>
-                                                        {risk.label}
-                                                    </span>
-                                                    <ArrowUpRight size={13} className="flex-shrink-0 transition-colors" style={{ color: T.textFaint }} />
-                                                </Link>
+                                                    <p className="text-xl font-black" style={{ color: T.text }}>{count}</p>
+                                                    <p className="text-[11px] font-medium truncate mt-0.5" style={{ color: item.color }}>{item.label}</p>
+                                                </div>
                                             );
                                         })}
                                     </div>
-                                )}
-                            </Panel>
-
-                            {/* Top Calls */}
-                            {!loading && topCalls.length > 0 && (
-                                <div>
-                                    <div className="mb-2.5">
-                                        <SectionLabel T={T} icon={Crown} tone="#f59e0b">Top Calls This Period</SectionLabel>
-                                    </div>
-                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                        {topCalls.map((call, i) => (
-                                            <Link key={call.id} to={`/w/${user?.companySlug || "default"}/calls/${call.id}`}
-                                                className="flex items-center gap-2.5 p-3 rounded-xl transition-all"
-                                                style={{ background: T.panel, border: `1px solid ${T.panelBorder}` }}>
-                                                <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: `${MEDALS[i]}22`, border: `1px solid ${MEDALS[i]}55` }}>
-                                                    {i === 0 ? <Crown size={13} style={{ color: MEDALS[i] }} /> : <Medal size={12} style={{ color: MEDALS[i] }} />}
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-xs font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p>
-                                                    <p className="text-[10px] truncate" style={{ color: T.textFaint }}>{timeAgo(call.createdAt)}</p>
-                                                </div>
-                                                <span className="text-sm font-black flex-shrink-0" style={{ color: "#8b5cf6" }}>{call.overallScore}</span>
-                                            </Link>
-                                        ))}
-                                    </div>
                                 </div>
-                            )}
-                        </div>
 
-                    {/* ══════════════════════════════════════════════════
+                                {/* Critical Alerts */}
+                                <Panel T={T} style={needsAttention.length > 0 ? { background: "rgba(239,68,68,0.035)", borderColor: "rgba(239,68,68,0.2)" } : {}}>
+                                    <PanelHeader T={T}
+                                        title={<span className="flex items-center gap-2"><ShieldAlert size={15} className="text-red-400" /> Critical Alerts</span>}
+                                        sub={(loading || dashboardLoading) ? "Scanning conversations…" : dashboardError ? "Unable to load right now" : needsAttention.length > 0 ? `${needsAttention.length} conversation${needsAttention.length !== 1 ? "s" : ""} need review` : "Nothing needs your attention right now"}
+                                    />
+                                    {(loading || dashboardLoading) ? (
+                                        <div className="space-y-2"><Skeleton T={T} className="h-14" /><Skeleton T={T} className="h-14" /></div>
+                                    ) : needsAttention.length === 0 ? (
+                                        <div className="flex items-center gap-3 py-6 justify-center" style={{ color: T.textFaint }}>
+                                            <CheckCircle size={18} className="text-emerald-400" />
+                                            <span className="text-sm">All clear — your team is performing well.</span>
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                            {needsAttention.map(call => {
+                                                const risk = RISK_CFG[call.riskLevel];
+                                                return (
+                                                    <Link key={call.id} to={`/w/${user?.companySlug || "default"}/calls/${call.id}`}
+                                                        className="flex items-center gap-3 p-3.5 rounded-xl transition-all group"
+                                                        style={{ background: T.panelHover, border: `1px solid ${T.panelBorder}` }}
+                                                        onMouseEnter={e => { e.currentTarget.style.borderColor = `${risk.color}55`; }}
+                                                        onMouseLeave={e => { e.currentTarget.style.borderColor = T.panelBorder; }}>
+                                                        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: risk.bg, border: `1px solid ${risk.border}` }}>
+                                                            <risk.Icon size={16} style={{ color: risk.color }} />
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-sm font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p>
+                                                            <p className="text-xs truncate" style={{ color: T.textFaint }}>
+                                                                {call.overallScore != null ? `Scored ${call.overallScore}/100` : "Negative sentiment"} · {timeAgo(call.createdAt)}
+                                                            </p>
+                                                        </div>
+                                                        <span className="text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0" style={{ background: risk.bg, color: risk.color }}>
+                                                            {risk.label}
+                                                        </span>
+                                                        <ArrowUpRight size={13} className="flex-shrink-0 transition-colors" style={{ color: T.textFaint }} />
+                                                    </Link>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </Panel>
+
+                                {/* Top Calls */}
+                                {!loading && topCalls.length > 0 && (
+                                    <div>
+                                        <div className="mb-2.5">
+                                            <SectionLabel T={T} icon={Crown} tone="#f59e0b">Top Calls This Period</SectionLabel>
+                                        </div>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                            {topCalls.map((call, i) => (
+                                                <Link key={call.id} to={`/w/${user?.companySlug || "default"}/calls/${call.id}`}
+                                                    className="flex items-center gap-2.5 p-3 rounded-xl transition-all"
+                                                    style={{ background: T.panel, border: `1px solid ${T.panelBorder}` }}>
+                                                    <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: `${MEDALS[i]}22`, border: `1px solid ${MEDALS[i]}55` }}>
+                                                        {i === 0 ? <Crown size={13} style={{ color: MEDALS[i] }} /> : <Medal size={12} style={{ color: MEDALS[i] }} />}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-xs font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p>
+                                                        <p className="text-[10px] truncate" style={{ color: T.textFaint }}>{timeAgo(call.createdAt)}</p>
+                                                    </div>
+                                                    <span className="text-sm font-black flex-shrink-0" style={{ color: "#8b5cf6" }}>{call.overallScore}</span>
+                                                </Link>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* ══════════════════════════════════════════════════
                         RECENT CALLS INBOX + DETAIL PANE (full width)
                         ══════════════════════════════════════════════════ */}
-                    {totalCalls > 0 && (
-                        <>
-                            <div>
-                                <div className="mb-3">
-                                    <SectionLabel T={T} icon={Radio} tone="#06b6d4">Recent Conversations</SectionLabel>
-                                </div>
-                                <div className="grid grid-cols-1 xl:grid-cols-5 gap-5 items-start">
-                                    <Panel T={T} className="xl:col-span-2" style={{ padding: "1.25rem" }}>
-                                        <PanelHeader T={T} title="Recent Calls" sub="Click to preview details"
-                                            right={<span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.2)", color: "#a78bfa" }}>{totalCalls} total</span>}
-                                        />
-                                        {loading ? (
-                                            <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} T={T} className="h-16" />)}</div>
-                                        ) : (
-                                            <div className="space-y-1.5">
-                                                {recentCalls.map(call => {
-                                                    const cfg = SENT_CONFIG[call.sentiment] || SENT_CONFIG.NEUTRAL;
-                                                    const SIcon = cfg.Icon;
-                                                    const isSelected = selectedCall?.id === call.id;
-                                                    return (
-                                                        <div key={call.id}
-                                                            className="w-full flex items-center gap-2 sm:gap-2.5 p-3 rounded-xl transition-all duration-200 group cursor-pointer"
-                                                            style={{ background: isSelected ? "rgba(139,92,246,0.1)" : T.panelHover, border: isSelected ? "1px solid rgba(139,92,246,0.35)" : `1px solid ${T.panelBorder}` }}>
-                                                            <div className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 text-white"
-                                                                style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>
-                                                                {call.fileName?.[0]?.toUpperCase() ?? "C"}
-                                                            </div>
-                                                            <MiniAudioPlayer
-                                                                cloudinaryUrl={call.cloudinaryUrl}
-                                                                playingId={playingId}
-                                                                callId={call.id}
-                                                                onPlay={setPlayingId}
-                                                                onStop={() => setPlayingId(null)}
-                                                            />
-                                                            <button onClick={() => setSelectedCall(call)} className="flex-1 min-w-0 text-left">
-                                                                <p className="text-xs font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p>
-                                                                <p className="text-[10px] mt-0.5" style={{ color: T.textFaint }}>
-                                                                    {call.createdAt ? new Date(call.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Unknown"}
-                                                                </p>
-                                                            </button>
-                                                            <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                                                                {call.overallScore != null && <span className="text-[10px] font-black" style={{ color: T.text }}>{call.overallScore}</span>}
-                                                                <Link to={`/w/${user?.companySlug || "default"}/calls/${call.id}`} onClick={e => e.stopPropagation()}
-                                                                    className="flex items-center gap-0.5 text-[10px] text-violet-400 hover:text-violet-300 font-semibold transition-colors">
-                                                                    View <ArrowRight size={9} />
-                                                                </Link>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-                                    </Panel>
+                            {totalCalls > 0 && (
+                                <>
+                                    <div>
+                                        <div className="mb-3">
+                                            <SectionLabel T={T} icon={Radio} tone="#06b6d4">Recent Conversations</SectionLabel>
+                                        </div>
+                                        <div className="grid grid-cols-1 xl:grid-cols-5 gap-5 items-start">
+                                            <Panel T={T} className="xl:col-span-2" style={{ padding: "1.25rem" }}>
+                                                <PanelHeader T={T} title="Recent Calls" sub="Click to preview details"
+                                                    right={<span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.2)", color: "#a78bfa" }}>{totalCalls} total</span>}
+                                                />
+                                                {loading ? (
+                                                    <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} T={T} className="h-16" />)}</div>
+                                                ) : (
+                                                    <div className="space-y-1.5">
+                                                        {recentCalls.map(call => {
+                                                            const cfg = SENT_CONFIG[call.sentiment] || SENT_CONFIG.NEUTRAL;
+                                                            const SIcon = cfg.Icon;
+                                                            const isSelected = selectedCall?.id === call.id;
+                                                            return (
+                                                                <div key={call.id}
+                                                                    className="w-full flex items-center gap-2 sm:gap-2.5 p-3 rounded-xl transition-all duration-200 group cursor-pointer"
+                                                                    style={{ background: isSelected ? "rgba(139,92,246,0.1)" : T.panelHover, border: isSelected ? "1px solid rgba(139,92,246,0.35)" : `1px solid ${T.panelBorder}` }}>
+                                                                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 text-white"
+                                                                        style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>
+                                                                        {call.fileName?.[0]?.toUpperCase() ?? "C"}
+                                                                    </div>
+                                                                    <MiniAudioPlayer
+                                                                        cloudinaryUrl={call.cloudinaryUrl}
+                                                                        playingId={playingId}
+                                                                        callId={call.id}
+                                                                        onPlay={setPlayingId}
+                                                                        onStop={() => setPlayingId(null)}
+                                                                    />
+                                                                    <button onClick={() => setSelectedCall(call)} className="flex-1 min-w-0 text-left">
+                                                                        <p className="text-xs font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p>
+                                                                        <p className="text-[10px] mt-0.5" style={{ color: T.textFaint }}>
+                                                                            {call.createdAt ? new Date(call.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Unknown"}
+                                                                        </p>
+                                                                    </button>
+                                                                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                                                                        {call.overallScore != null && <span className="text-[10px] font-black" style={{ color: T.text }}>{call.overallScore}</span>}
+                                                                        <Link to={`/w/${user?.companySlug || "default"}/calls/${call.id}`} onClick={e => e.stopPropagation()}
+                                                                            className="flex items-center gap-0.5 text-[10px] text-violet-400 hover:text-violet-300 font-semibold transition-colors">
+                                                                            View <ArrowRight size={9} />
+                                                                        </Link>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </Panel>
 
-                                    <div className="xl:col-span-3 rounded-2xl p-5 min-h-64 overflow-hidden" style={{ background: T.panel, border: `1px solid ${T.panelBorder}` }}>
-                                        {loading ? (
-                                            <div className="space-y-4"><Skeleton T={T} className="h-8 w-2/3" /><Skeleton T={T} className="h-20" /><Skeleton T={T} className="h-28" /></div>
-                                        ) : selectedCall ? (
-                                            <CallDetailPanel call={selectedCall} />
-                                        ) : (
-                                            <div className="flex flex-col items-center justify-center h-48 text-sm gap-3" style={{ color: T.textFaint }}>
-                                                <Phone size={32} />
-                                                <span>Select a call to see details</span>
+                                            <div className="xl:col-span-3 rounded-2xl p-5 min-h-64 overflow-hidden" style={{ background: T.panel, border: `1px solid ${T.panelBorder}` }}>
+                                                {loading ? (
+                                                    <div className="space-y-4"><Skeleton T={T} className="h-8 w-2/3" /><Skeleton T={T} className="h-20" /><Skeleton T={T} className="h-28" /></div>
+                                                ) : selectedCall ? (
+                                                    <CallDetailPanel call={selectedCall} />
+                                                ) : (
+                                                    <div className="flex flex-col items-center justify-center h-48 text-sm gap-3" style={{ color: T.textFaint }}>
+                                                        <Phone size={32} />
+                                                        <span>Select a call to see details</span>
+                                                    </div>
+                                                )}
                                             </div>
-                                        )}
+                                        </div>
                                     </div>
-                                </div>
-                            </div>
+                                </>
+                            )}
                         </>
                     )}
-                        </>
-                    )}
-        </main>
+                </main>
 
                 <footer className="mt-4" style={{ borderTop: `1px solid ${T.divider}` }}>
                     <div className="px-6 py-5 flex flex-col sm:flex-row items-center justify-between gap-2">
