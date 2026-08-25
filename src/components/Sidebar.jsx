@@ -16,30 +16,42 @@ import {
 /* ────────────────────────────────────────────────────────────────────── */
 export const THEMES = {
     dark: {
+        isDark: true,
         pageBg: "linear-gradient(160deg, #05060A 0%, #0B1020 45%, #070912 100%)",
         sidebarBg: "rgba(8,9,18,0.92)",
-        headerBg: "rgba(5,6,10,0.82)",
+        headerBg: "rgba(5,6,10,0.85)",
         panel: "rgba(255,255,255,0.025)",
+        panelSolid: "#0e1326",
         panelBorder: "rgba(255,255,255,0.07)",
         panelHover: "rgba(255,255,255,0.045)",
         inputBg: "rgba(255,255,255,0.04)",
+        popoverBg: "rgba(10,10,26,0.98)",
+        popoverBorder: "rgba(255,255,255,0.12)",
+        popoverShadow: "0 20px 60px rgba(0,0,0,0.5)",
         text: "#f8fafc",
         textMuted: "#94a3b8",
         textFaint: "#475569",
         divider: "rgba(255,255,255,0.06)",
+        cardShadow: "0 4px 20px rgba(0,0,0,0.25)",
     },
     light: {
-        pageBg: "linear-gradient(160deg, #f8f9fc 0%, #eef0f7 45%, #f4f5fb 100%)",
-        sidebarBg: "rgba(255,255,255,0.9)",
-        headerBg: "rgba(255,255,255,0.85)",
-        panel: "rgba(17,24,39,0.025)",
-        panelBorder: "rgba(17,24,39,0.08)",
-        panelHover: "rgba(17,24,39,0.045)",
-        inputBg: "rgba(17,24,39,0.04)",
+        isDark: false,
+        pageBg: "linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)",
+        sidebarBg: "#ffffff",
+        headerBg: "rgba(255,255,255,0.95)",
+        panel: "#ffffff",
+        panelSolid: "#ffffff",
+        panelBorder: "#e2e8f0",
+        panelHover: "#f8fafc",
+        inputBg: "#ffffff",
+        popoverBg: "#ffffff",
+        popoverBorder: "#e2e8f0",
+        popoverShadow: "0 20px 40px -10px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.05)",
         text: "#0f172a",
         textMuted: "#475569",
-        textFaint: "#94a3b8",
-        divider: "rgba(17,24,39,0.07)",
+        textFaint: "#64748b",
+        divider: "#e2e8f0",
+        cardShadow: "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)",
     },
 };
 
@@ -184,90 +196,117 @@ export function Sidebar({ collapsed, setCollapsed, T, user, handleLogout, curren
         <aside className={`hidden md:flex flex-col flex-shrink-0 h-screen sticky top-0 transition-all duration-300 z-40 ${collapsed ? "w-[76px]" : "w-64"}`}
             style={{ background: T.sidebarBg, borderRight: `1px solid ${T.divider}`, backdropFilter: "blur(20px)" }}>
 
-            <div className={`h-16 flex items-center flex-shrink-0 ${collapsed ? "justify-center px-0" : "justify-between px-5"}`}
+            {/* Top Sidebar Header: Convexa Platform Brand + Workspace Switcher */}
+            <div className={`flex flex-col flex-shrink-0 ${collapsed ? "py-4 items-center justify-center" : "p-3.5 space-y-2.5"}`}
                 style={{ borderBottom: `1px solid ${T.divider}` }}>
-                {!collapsed && (
-                    <div className="relative w-full">
-                        <button 
-                            onClick={() => setWsDropdownOpen(!wsDropdownOpen)}
-                            className="flex items-center justify-between w-full p-2 rounded-xl transition-all duration-200 text-left hover:bg-[rgba(255,255,255,0.05)]"
-                            style={{ color: T.text }}
-                        >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                                {isLogoInvalid ? (
-                                    <div className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-white flex-shrink-0"
-                                        style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)", boxShadow: "0 2px 8px rgba(139,92,246,0.2)" }}>
-                                        <span className="text-xs">{user?.companyName ? user.companyName[0].toUpperCase() : "C"}</span>
-                                    </div>
-                                ) : (
-                                    <img src={user.companyLogo} alt="Workspace Logo" className="h-8 w-8 rounded-lg object-contain flex-shrink-0" />
-                                )}
-                                <div className="min-w-0">
-                                    <p className="text-sm font-black tracking-tight truncate" style={{ color: T.text }}>
-                                        {user?.companyName || "Convexa AI"}
-                                    </p>
-                                    <p className="text-[10px] truncate" style={{ color: T.textFaint }}>
-                                        {user?.companyName ? `${user.role || "Member"}` : "Conversation Intelligence"}
-                                    </p>
+                {!collapsed ? (
+                    <>
+                        {/* Convexa AI Platform Brand Mark */}
+                        <div className="flex items-center justify-between px-1">
+                            <div className="flex items-center gap-2">
+                                <img src={logo} alt="Convexa AI" className="h-5 w-auto object-contain flex-shrink-0" />
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="text-xs font-black tracking-tight uppercase" style={{ color: T.text }}>Convexa</span>
+                                    <span className="px-1.5 py-0.2 rounded text-[8px] font-extrabold uppercase tracking-wider bg-violet-500/20 text-violet-600 dark:text-violet-300 border border-violet-500/30">AI</span>
                                 </div>
                             </div>
-                            <ChevronDown size={16} className={`flex-shrink-0 transition-transform duration-200 ${wsDropdownOpen ? "rotate-180" : ""}`} style={{ color: T.textMuted }} />
-                        </button>
+                            <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: T.textFaint }}>v2.0</span>
+                        </div>
 
-                        {/* Dropdown Menu */}
-                        {wsDropdownOpen && (
-                            <div className="absolute left-0 right-0 mt-2 p-1.5 rounded-2xl border backdrop-blur-xl shadow-2xl z-50 animate-fade-in"
-                                style={{ 
-                                    background: T.sidebarBg, 
-                                    borderColor: T.divider,
-                                    boxShadow: "0 20px 40px rgba(0,0,0,0.5)"
+                        {/* Divider */}
+                        <div className="h-[1px] w-full" style={{ background: T.divider }} />
+
+                        {/* Multi-Tenant Workspace Selector */}
+                        <div className="relative w-full">
+                            <button 
+                                onClick={() => setWsDropdownOpen(!wsDropdownOpen)}
+                                className="flex items-center justify-between w-full p-2 rounded-xl transition-all duration-200 text-left hover:opacity-90"
+                                style={{
+                                    color: T.text,
+                                    background: T.isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)",
+                                    border: `1px solid ${T.panelBorder}`
                                 }}
+                                title="Switch workspace"
                             >
-                                <p className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-500">Switch Workspace</p>
-                                <div className="max-h-60 overflow-y-auto space-y-0.5">
-                                    {workspaces.map((ws) => {
-                                        const isActive = currentWorkspace?.company?.id === ws.id;
-                                        const isWsLogoInvalid = !ws.logoUrl || ws.logoUrl.trim() === "" || ws.logoUrl.includes("placeholder.com") || ws.logoUrl.includes("via.placeholder.com");
-                                        return (
-                                            <button
-                                                key={ws.id}
-                                                type="button"
-                                                onClick={() => {
-                                                    setWsDropdownOpen(false);
-                                                    switchWorkspace(ws.slug);
-                                                }}
-                                                className="w-full flex items-center gap-2.5 p-2 rounded-xl transition-all duration-200 text-left hover:bg-[rgba(255,255,255,0.05)]"
-                                                style={isActive ? { background: "rgba(139,92,246,0.1)", color: "#c4b5fd" } : { color: T.textMuted }}
-                                            >
-                                                {isWsLogoInvalid ? (
-                                                    <div className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-white flex-shrink-0 text-xs"
-                                                        style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)" }}>
-                                                        {ws.name ? ws.name[0].toUpperCase() : "C"}
-                                                    </div>
-                                                ) : (
-                                                    <img src={ws.logoUrl} alt="Workspace Logo" className="h-7 w-7 rounded-lg object-contain flex-shrink-0" />
-                                                )}
-                                                <div className="min-w-0 flex-1">
-                                                    <p className="text-xs font-semibold truncate">{ws.name}</p>
-                                                </div>
-                                                {isActive && <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />}
-                                            </button>
-                                        );
-                                    })}
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    {isLogoInvalid ? (
+                                        <div className="w-7 h-7 rounded-lg flex items-center justify-center font-black text-white flex-shrink-0 text-xs"
+                                            style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)", boxShadow: "0 2px 8px rgba(139,92,246,0.2)" }}>
+                                            <span>{user?.companyName ? user.companyName[0].toUpperCase() : "C"}</span>
+                                        </div>
+                                    ) : (
+                                        <img src={user.companyLogo} alt="Workspace Logo" className="h-7 w-7 rounded-lg object-contain flex-shrink-0" />
+                                    )}
+                                    <div className="min-w-0">
+                                        <p className="text-xs font-bold tracking-tight truncate" style={{ color: T.text }}>
+                                            {user?.companyName || "Convexa AI"}
+                                        </p>
+                                        <p className="text-[9px] font-semibold uppercase tracking-wider truncate" style={{ color: T.textFaint }}>
+                                            {user?.role || "Member"}
+                                        </p>
+                                    </div>
                                 </div>
+                                <ChevronDown size={14} className={`flex-shrink-0 transition-transform duration-200 ${wsDropdownOpen ? "rotate-180" : ""}`} style={{ color: T.textFaint }} />
+                            </button>
+
+                            {/* Dropdown Menu */}
+                            {wsDropdownOpen && (
+                                <div className="absolute left-0 right-0 mt-2 p-1.5 rounded-2xl border backdrop-blur-xl shadow-2xl z-50 animate-fade-in"
+                                    style={{ 
+                                        background: T.popoverBg, 
+                                        borderColor: T.popoverBorder,
+                                        boxShadow: T.popoverShadow
+                                    }}
+                                >
+                                    <p className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest" style={{ color: T.textFaint }}>Switch Workspace</p>
+                                    <div className="max-h-60 overflow-y-auto space-y-0.5">
+                                        {workspaces.map((ws) => {
+                                            const isActive = currentWorkspace?.company?.id === ws.id;
+                                            const isWsLogoInvalid = !ws.logoUrl || ws.logoUrl.trim() === "" || ws.logoUrl.includes("placeholder.com") || ws.logoUrl.includes("via.placeholder.com");
+                                            return (
+                                                <button
+                                                    key={ws.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setWsDropdownOpen(false);
+                                                        switchWorkspace(ws.slug);
+                                                    }}
+                                                    className="w-full flex items-center gap-2.5 p-2 rounded-xl transition-all duration-200 text-left hover:opacity-80"
+                                                    style={isActive ? { background: "rgba(139,92,246,0.12)", color: "#7c3aed", fontWeight: 700 } : { color: T.textMuted }}
+                                                >
+                                                    {isWsLogoInvalid ? (
+                                                        <div className="w-6 h-6 rounded-lg flex items-center justify-center font-bold text-white flex-shrink-0 text-[10px]"
+                                                            style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)" }}>
+                                                            {ws.name ? ws.name[0].toUpperCase() : "C"}
+                                                        </div>
+                                                    ) : (
+                                                        <img src={ws.logoUrl} alt="Workspace Logo" className="h-6 w-6 rounded-lg object-contain flex-shrink-0" />
+                                                    )}
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-xs truncate">{ws.name}</p>
+                                                    </div>
+                                                    {isActive && <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </>
+                ) : (
+                    <div className="flex flex-col items-center gap-2">
+                        <img src={logo} alt="Convexa AI" className="h-6 w-auto object-contain" title="Convexa AI" />
+                        {isLogoInvalid ? (
+                            <div className="w-7 h-7 rounded-lg flex items-center justify-center font-black text-white flex-shrink-0 text-[10px]"
+                                style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)", boxShadow: "0 2px 8px rgba(139,92,246,0.2)" }}
+                                title={user?.companyName}>
+                                <span>{user?.companyName ? user.companyName[0].toUpperCase() : "C"}</span>
                             </div>
+                        ) : (
+                            <img src={user.companyLogo} alt="Workspace Logo" className="h-7 w-7 rounded-lg object-contain" title={user?.companyName} />
                         )}
                     </div>
-                )}
-                {collapsed && (
-                    isLogoInvalid ? (
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-white flex-shrink-0"
-                            style={{ background: "linear-gradient(135deg, #8b5cf6, #4f46e5)", boxShadow: "0 2px 8px rgba(139,92,246,0.2)" }}>
-                            <span className="text-xs">{user?.companyName ? user.companyName[0].toUpperCase() : "C"}</span>
-                        </div>
-                    ) : (
-                        <img src={user.companyLogo} alt="Workspace Logo" className="h-8 w-8 rounded-lg object-contain" />
-                    )
                 )}
             </div>
 

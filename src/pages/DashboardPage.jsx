@@ -11,6 +11,7 @@ import { logoutAndRedirect } from "../components/ProtectedRoute";
 import logo from "../assets/CONVEXA_AI_logo.png";
 import MiniAudioPlayer from "../components/MiniAudioPlayer.jsx";
 import { Sidebar } from "../components/Sidebar.jsx";
+import { NotificationPopover } from "../components/NotificationPopover.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
 import { useWorkspace } from "../context/WorkspaceContext.jsx";
 import {
@@ -991,6 +992,18 @@ function OwnerDashboardView({
     const [alertFilter, setAlertFilter] = useState("all");
     const [auditLogsOpen, setAuditLogsOpen] = useState(false);
 
+    // Admin & Local Filter Dropdown states
+    const [adminMenuOpen, setAdminMenuOpen] = useState(false);
+    const adminMenuRef = useRef(null);
+    const [recentFilterOpen, setRecentFilterOpen] = useState(false);
+    const recentFilterWrapRef = useRef(null);
+    const [recentFilters, setRecentFilters] = useState({
+        sentiment: "all",
+        qaScore: "all",
+        outcomeStatus: "all",
+        callType: "all"
+    });
+
     const [briefingData, setBriefingData] = useState(null);
     const [briefingLoading, setBriefingLoading] = useState(true);
     const [briefingError, setBriefingError] = useState(false);
@@ -1003,11 +1016,39 @@ function OwnerDashboardView({
     const [mediaLibraryLoading, setMediaLibraryLoading] = useState(true);
     const [mediaLibraryError, setMediaLibraryError] = useState(false);
 
+    // Handle outside clicks for Admin Menu and Recent Filter popovers
+    useEffect(() => {
+        const handler = (e) => {
+            if (adminMenuOpen && adminMenuRef.current && !adminMenuRef.current.contains(e.target)) {
+                setAdminMenuOpen(false);
+            }
+            if (recentFilterOpen && recentFilterWrapRef.current && !recentFilterWrapRef.current.contains(e.target)) {
+                setRecentFilterOpen(false);
+            }
+        };
+        const handleKeyDown = (e) => {
+            if (e.key === "Escape") {
+                setAdminMenuOpen(false);
+                setRecentFilterOpen(false);
+            }
+        };
+        if (adminMenuOpen || recentFilterOpen) {
+            document.addEventListener("mousedown", handler);
+            document.addEventListener("keydown", handleKeyDown);
+        }
+        return () => {
+            document.removeEventListener("mousedown", handler);
+            document.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [adminMenuOpen, recentFilterOpen]);
+
     useEffect(() => {
         let isMounted = true;
         setBriefingLoading(true);
         setBriefingError(false);
-        api.get("/api/company/executive-briefing")
+
+        // Fetch Executive Briefing with active dateRange
+        api.get(`/api/company/executive-briefing?range=${dateRange}`)
             .then(res => {
                 if (isMounted) {
                     setBriefingData(res.data);
@@ -1110,7 +1151,7 @@ function OwnerDashboardView({
         return getOptimalDateTicks(trendChartData, dateRange);
     }, [trendChartData, dateRange]);
 
-    const rangeLabel = dateRange === "7d" ? "7-Day" : dateRange === "90d" ? "90-Day" : "30-Day";
+    const rangeLabel = dateRange === "7d" ? "7-Day" : dateRange === "all" ? "All-Time" : "30-Day";
 
     const alerts = useMemo(() => {
         if (!companyStats?.alerts) return [];
@@ -1184,89 +1225,215 @@ function OwnerDashboardView({
         };
     }, [companyStats?.teamInsights, topPerformers, needsCoaching]);
 
+    // Ranged calls respecting global dateRange (7d, 30d, all)
+    const rangedCalls = useMemo(() => {
+        if (!calls || calls.length === 0) return [];
+        if (dateRange === "all") return calls;
+        const days = dateRange === "7d" ? 7 : 30;
+        const cutoff = Date.now() - days * 86400000;
+        return calls.filter(c => !c.createdAt || new Date(c.createdAt).getTime() >= cutoff);
+    }, [calls, dateRange]);
+
+    const outcomeStatusOptions = useMemo(
+        () => Array.from(new Set(rangedCalls.map(c => c.outcomeStatus || c.outcome).filter(Boolean))),
+        [rangedCalls]
+    );
+
+    const callTypeOptions = useMemo(
+        () => Array.from(new Set(rangedCalls.map(c => c.callType).filter(Boolean))),
+        [rangedCalls]
+    );
+
+    const activeRecentFilterCount = (recentFilters.sentiment !== "all" ? 1 : 0)
+        + (recentFilters.qaScore !== "all" ? 1 : 0)
+        + (recentFilters.outcomeStatus !== "all" ? 1 : 0)
+        + (recentFilters.callType !== "all" ? 1 : 0);
+
+    const resetRecentFilters = () => setRecentFilters({ sentiment: "all", qaScore: "all", outcomeStatus: "all", callType: "all" });
+
+    const filteredRecentCalls = useMemo(() => {
+        return rangedCalls.filter(c => {
+            if (recentFilters.sentiment !== "all" && c.sentiment !== recentFilters.sentiment) return false;
+            if (recentFilters.qaScore !== "all") {
+                const s = c.overallScore;
+                if (s == null) return false;
+                if (recentFilters.qaScore === "high" && s < 80) return false;
+                if (recentFilters.qaScore === "medium" && (s < 50 || s >= 80)) return false;
+                if (recentFilters.qaScore === "low" && s >= 50) return false;
+            }
+            const status = c.outcomeStatus || c.outcome;
+            if (recentFilters.outcomeStatus !== "all" && status !== recentFilters.outcomeStatus) return false;
+            if (recentFilters.callType !== "all" && c.callType !== recentFilters.callType) return false;
+            return true;
+        });
+    }, [rangedCalls, recentFilters]);
+
+    const isLogoInvalid = !user?.companyLogo || user.companyLogo.trim() === "" || user.companyLogo.includes("placeholder.com") || user.companyLogo.includes("via.placeholder.com");
+
+    const orgHealthDelta = useMemo(() => {
+        if (dailyMetrics && dailyMetrics.length >= 2) {
+            const first = dailyMetrics[0].organizationHealth || 0;
+            const last = dailyMetrics[dailyMetrics.length - 1].organizationHealth || 0;
+            const delta = last - first;
+            return `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%`;
+        }
+        return "+0.0%";
+    }, [dailyMetrics]);
+
+    const handleExportExecutiveReport = () => {
+        import("../utils/generateExecutiveReport.js").then(({ generateExecutiveReport }) => {
+            generateExecutiveReport({
+                companyName: user?.companyName || "Workspace",
+                companyLogo: isLogoInvalid ? null : user?.companyLogo,
+                dateRange,
+                companyStats,
+                briefingData,
+                pipelineData,
+                mediaLibrary,
+                dailyMetrics,
+                calls: rangedCalls,
+                user,
+            });
+        }).catch(err => {
+            console.error("Export report error:", err);
+        });
+    };
+
+    const isDark = T?.isDark ?? true;
+
     return (
         <div className="space-y-6">
-            {/* 1. EXECUTIVE HEADER & QUICK ACTIONS */}
+            {/* 1. EXECUTIVE HEADER & QUICK ACTIONS HIERARCHY */}
             <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 pb-4"
                 style={{ borderBottom: `1px solid ${T.divider}` }}>
                 <div>
                     <div className="flex items-center gap-2 mb-1">
                         <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider"
-                            style={{ background: "rgba(139,92,246,0.15)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.3)" }}>
+                            style={{
+                                background: isDark ? "rgba(139,92,246,0.15)" : "#f5f3ff",
+                                color: isDark ? "#c4b5fd" : "#7c3aed",
+                                border: `1px solid ${isDark ? "rgba(139,92,246,0.3)" : "#ddd6fe"}`
+                            }}>
                             CEO & Executive Portal
                         </span>
                         <LivePulse label="Live · Executive Command Radar" />
                     </div>
-                    <h1 className="text-2xl md:text-3xl font-black tracking-tight text-white">
+                    <h1 className="text-2xl md:text-3xl font-black tracking-tight" style={{ color: T.text }}>
                         Executive Command Center
                     </h1>
-                    <p className="text-xs md:text-sm mt-1" style={{ color: T.textMuted }}>
+                    <p className="text-xs md:text-sm mt-1 font-medium" style={{ color: T.textMuted }}>
                         Real-time revenue intelligence, organizational quality index, and workspace governance.
                     </p>
                 </div>
 
-                {/* 6 Executive Quick Actions */}
+                {/* Top Action Hierarchy: [Upload Calls] [Invite Member] [Export Reports] [More / Admin] */}
                 <div className="flex flex-wrap items-center gap-2">
-                    <button onClick={onInvite}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white transition-all active:scale-95 shadow-md hover:brightness-110"
-                        style={{ background: "rgba(139,92,246,0.2)", border: "1px solid rgba(139,92,246,0.4)" }}>
-                        <UserPlus size={13} className="text-violet-300" />
-                        Invite Member
-                    </button>
-
+                    {/* Primary CTA */}
                     <button onClick={onUpload}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white transition-all active:scale-95 shadow-md hover:brightness-110"
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white transition-all active:scale-95 shadow-md shadow-violet-500/25 hover:brightness-110"
                         style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>
                         <Upload size={13} />
                         Upload Calls
                     </button>
 
-                    <button onClick={onExport}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 hover:bg-white/10"
-                        style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }}>
+                    {/* Secondary Action */}
+                    <button onClick={onInvite}
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 hover:opacity-90"
+                        style={{
+                            background: isDark ? "rgba(139,92,246,0.15)" : "#f5f3ff",
+                            border: `1px solid ${isDark ? "rgba(139,92,246,0.35)" : "#ddd6fe"}`,
+                            color: isDark ? "#ffffff" : "#7c3aed"
+                        }}>
+                        <UserPlus size={13} style={{ color: isDark ? "#c4b5fd" : "#7c3aed" }} />
+                        Invite Member
+                    </button>
+
+                    {/* Tertiary Action */}
+                    <button onClick={handleExportExecutiveReport}
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95 hover:opacity-90"
+                        style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text, boxShadow: T.cardShadow }}>
                         <Download size={13} style={{ color: T.textMuted }} />
                         Export Reports
                     </button>
 
-                    <button onClick={() => navigate(`/w/${companySlug}/company/billing`)}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 hover:bg-white/10"
-                        style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }}>
-                        <CreditCard size={13} className="text-amber-400" />
-                        Manage Billing
-                    </button>
+                    {/* Compact Overflow / Admin Menu */}
+                    <div className="relative" ref={adminMenuRef}>
+                        <button onClick={() => setAdminMenuOpen(o => !o)}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95 hover:opacity-90"
+                            style={{
+                                background: adminMenuOpen ? T.panelHover : T.inputBg,
+                                border: `1px solid ${adminMenuOpen ? "rgba(139,92,246,0.4)" : T.panelBorder}`,
+                                color: T.text,
+                                boxShadow: T.cardShadow
+                            }}
+                            title="More workspace actions">
+                            <MoreHorizontal size={14} style={{ color: T.textFaint }} />
+                            <span>More</span>
+                            <ChevronDown size={11} className={`transition-transform ${adminMenuOpen ? "rotate-180" : ""}`} style={{ color: T.textFaint }} />
+                        </button>
 
-                    <button onClick={() => navigate(`/w/${companySlug}/company/settings`)}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 hover:bg-white/10"
-                        style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }}>
-                        <Settings size={13} className="text-blue-400" />
-                        Workspace Settings
-                    </button>
-
-                    <button onClick={() => setAuditLogsOpen(true)}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 hover:bg-white/10"
-                        style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }}>
-                        <FileText size={13} className="text-emerald-400" />
-                        View Audit Logs
-                    </button>
+                        {adminMenuOpen && (
+                            <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl overflow-hidden z-50 p-1.5 space-y-1"
+                                style={{
+                                    background: T.popoverBg,
+                                    border: `1px solid ${T.popoverBorder}`,
+                                    backdropFilter: "blur(20px)",
+                                    boxShadow: T.popoverShadow,
+                                    animation: "dropdownIn 0.15s ease-out"
+                                }}>
+                                <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider"
+                                    style={{ color: T.textFaint, borderBottom: `1px solid ${T.divider}` }}>
+                                    Workspace Administration
+                                </div>
+                                <button onClick={() => { setAdminMenuOpen(false); navigate(`/w/${companySlug}/company/billing`); }}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors text-left hover:opacity-90"
+                                    style={{ color: T.text, background: "transparent" }}
+                                    onMouseEnter={e => e.currentTarget.style.background = T.panelHover}
+                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                    <CreditCard size={14} className="text-amber-500 flex-shrink-0" />
+                                    <span>Manage Billing & Plan</span>
+                                </button>
+                                <button onClick={() => { setAdminMenuOpen(false); navigate(`/w/${companySlug}/company/settings`); }}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors text-left hover:opacity-90"
+                                    style={{ color: T.text, background: "transparent" }}
+                                    onMouseEnter={e => e.currentTarget.style.background = T.panelHover}
+                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                    <Settings size={14} className="text-blue-500 flex-shrink-0" />
+                                    <span>Workspace Settings</span>
+                                </button>
+                                <button onClick={() => { setAdminMenuOpen(false); setAuditLogsOpen(true); }}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors text-left hover:opacity-90"
+                                    style={{ color: T.text, background: "transparent" }}
+                                    onMouseEnter={e => e.currentTarget.style.background = T.panelHover}
+                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                    <FileText size={14} className="text-emerald-500 flex-shrink-0" />
+                                    <span>View Audit Logs</span>
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 
             {/* 2. ORGANIZATION HEALTH SCORE (P0 - Very Top Banner) */}
             <div className="p-6 rounded-2xl border relative overflow-hidden"
                 style={{
-                    background: "linear-gradient(135deg, rgba(124,58,237,0.18) 0%, rgba(37,99,235,0.1) 100%)",
-                    borderColor: "rgba(139,92,246,0.35)",
-                    boxShadow: "0 12px 36px rgba(0,0,0,0.3)"
+                    background: isDark
+                        ? "linear-gradient(135deg, rgba(124,58,237,0.18) 0%, rgba(37,99,235,0.1) 100%)"
+                        : "linear-gradient(135deg, rgba(245,243,255,0.85) 0%, rgba(239,246,255,0.7) 100%)",
+                    borderColor: isDark ? "rgba(139,92,246,0.35)" : "#ddd6fe",
+                    boxShadow: isDark ? "0 12px 36px rgba(0,0,0,0.3)" : "0 1px 3px rgba(0,0,0,0.04)"
                 }}>
                 <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full opacity-20 blur-3xl pointer-events-none"
                     style={{ background: "radial-gradient(circle, #8b5cf6, transparent)" }} />
 
                 <div className="relative grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
                     {/* Left: Score Gauge */}
-                    <div className="lg:col-span-5 flex items-center gap-6 border-b lg:border-b-0 lg:border-r border-white/10 pb-6 lg:pb-0 lg:pr-6">
+                    <div className="lg:col-span-5 flex items-center gap-6 border-b lg:border-b-0 lg:border-r pb-6 lg:pb-0 lg:pr-6"
+                        style={{ borderColor: T.divider }}>
                         <div className="relative w-28 h-28 flex-shrink-0 flex items-center justify-center">
                             <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                                <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="10" />
+                                <circle cx="50" cy="50" r="42" fill="none" stroke={isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)"} strokeWidth="10" />
                                 <circle cx="50" cy="50" r="42" fill="none" stroke="url(#healthGrad)" strokeWidth="10"
                                     strokeDasharray="264" strokeDashoffset={264 - (264 * orgHealth) / 100}
                                     strokeLinecap="round" className="transition-all duration-1000 ease-out" />
@@ -1279,22 +1446,28 @@ function OwnerDashboardView({
                                 </defs>
                             </svg>
                             <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                                <span className="text-3xl font-black text-white leading-none">{orgHealth}</span>
-                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">/ 100</span>
+                                <span className="text-3xl font-black leading-none" style={{ color: T.text }}>{orgHealth}</span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest mt-0.5" style={{ color: T.textFaint }}>/ 100</span>
                             </div>
                         </div>
 
                         <div>
                             <div className="flex items-center gap-2 mb-1">
-                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider"
+                                    style={{
+                                        background: isDark ? "rgba(16,185,129,0.2)" : "#ecfdf5",
+                                        color: isDark ? "#6ee7b7" : "#059669",
+                                        border: `1px solid ${isDark ? "rgba(16,185,129,0.3)" : "#a7f3d0"}`
+                                    }}>
                                     Excellent Health
                                 </span>
-                                <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-0.5">
-                                    <TrendingUp size={11} /> +4.2%
+                                <span className="text-[10px] font-bold flex items-center gap-0.5"
+                                    style={{ color: isDark ? "#34d399" : "#059669" }}>
+                                    <TrendingUp size={11} /> {orgHealthDelta}
                                 </span>
                             </div>
-                            <h2 className="text-xl font-black text-white tracking-tight">Organization Health Score</h2>
-                            <p className="text-xs text-slate-300 mt-1 leading-relaxed max-w-sm">
+                            <h2 className="text-xl font-black tracking-tight" style={{ color: T.text }}>Organization Health Score</h2>
+                            <p className="text-xs mt-1 leading-relaxed max-w-sm" style={{ color: T.textMuted }}>
                                 Composite index of QA quality standards, customer sentiment ratio, active user engagement, and pipeline uptime.
                             </p>
                         </div>
@@ -1302,58 +1475,83 @@ function OwnerDashboardView({
 
                     {/* Right: 5 Contributing Factors */}
                     <div className="lg:col-span-7 grid grid-cols-2 sm:grid-cols-5 gap-3">
-                        <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex flex-col justify-between">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">QA Score</span>
+                        <div className="p-3 rounded-xl flex flex-col justify-between"
+                            style={{
+                                background: isDark ? "rgba(255,255,255,0.05)" : "#ffffff",
+                                border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#e2e8f0"}`,
+                                boxShadow: isDark ? "none" : "0 1px 2px rgba(0,0,0,0.03)"
+                            }}>
+                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>QA Score</span>
                             <div className="mt-2">
-                                <p className="text-lg font-black text-white">{avgScore}<span className="text-[10px] text-slate-500">/100</span></p>
-                                <div className="w-full bg-white/10 rounded-full h-1 mt-1">
-                                    <div className="bg-emerald-400 h-full rounded-full" style={{ width: `${Math.min(100, Number(avgScore))}%` }} />
+                                <p className="text-lg font-black" style={{ color: T.text }}>{avgScore}<span className="text-[10px] font-normal" style={{ color: T.textFaint }}>/100</span></p>
+                                <div className="w-full rounded-full h-1 mt-1" style={{ background: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)" }}>
+                                    <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${Math.min(100, Number(avgScore))}%` }} />
                                 </div>
-                                <p className="text-[9px] text-emerald-400 font-bold mt-1">Strong Standard</p>
+                                <p className="text-[9px] font-bold mt-1" style={{ color: isDark ? "#34d399" : "#059669" }}>Strong Standard</p>
                             </div>
                         </div>
 
-                        <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex flex-col justify-between">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sentiment</span>
+                        <div className="p-3 rounded-xl flex flex-col justify-between"
+                            style={{
+                                background: isDark ? "rgba(255,255,255,0.05)" : "#ffffff",
+                                border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#e2e8f0"}`,
+                                boxShadow: isDark ? "none" : "0 1px 2px rgba(0,0,0,0.03)"
+                            }}>
+                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Sentiment</span>
                             <div className="mt-2">
-                                <p className="text-lg font-black text-white">{posPct}%</p>
-                                <div className="w-full bg-white/10 rounded-full h-1 mt-1">
-                                    <div className="bg-violet-400 h-full rounded-full" style={{ width: `${posPct}%` }} />
+                                <p className="text-lg font-black" style={{ color: T.text }}>{posPct}%</p>
+                                <div className="w-full rounded-full h-1 mt-1" style={{ background: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)" }}>
+                                    <div className="bg-violet-500 h-full rounded-full" style={{ width: `${posPct}%` }} />
                                 </div>
-                                <p className="text-[9px] text-violet-300 font-bold mt-1">Positive Ratio</p>
+                                <p className="text-[9px] font-bold mt-1" style={{ color: isDark ? "#c4b5fd" : "#7c3aed" }}>Positive Ratio</p>
                             </div>
                         </div>
 
-                        <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex flex-col justify-between">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Usage</span>
+                        <div className="p-3 rounded-xl flex flex-col justify-between"
+                            style={{
+                                background: isDark ? "rgba(255,255,255,0.05)" : "#ffffff",
+                                border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#e2e8f0"}`,
+                                boxShadow: isDark ? "none" : "0 1px 2px rgba(0,0,0,0.03)"
+                            }}>
+                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Active Usage</span>
                             <div className="mt-2">
-                                <p className="text-lg font-black text-white">{seatPct}%</p>
-                                <div className="w-full bg-white/10 rounded-full h-1 mt-1">
-                                    <div className="bg-blue-400 h-full rounded-full" style={{ width: `${seatPct}%` }} />
+                                <p className="text-lg font-black" style={{ color: T.text }}>{seatPct}%</p>
+                                <div className="w-full rounded-full h-1 mt-1" style={{ background: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)" }}>
+                                    <div className="bg-blue-500 h-full rounded-full" style={{ width: `${seatPct}%` }} />
                                 </div>
-                                <p className="text-[9px] text-blue-300 font-bold mt-1">High Engagement</p>
+                                <p className="text-[9px] font-bold mt-1" style={{ color: isDark ? "#93c5fd" : "#2563eb" }}>High Engagement</p>
                             </div>
                         </div>
 
-                        <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex flex-col justify-between">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">AI Pipeline</span>
+                        <div className="p-3 rounded-xl flex flex-col justify-between"
+                            style={{
+                                background: isDark ? "rgba(255,255,255,0.05)" : "#ffffff",
+                                border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#e2e8f0"}`,
+                                boxShadow: isDark ? "none" : "0 1px 2px rgba(0,0,0,0.03)"
+                            }}>
+                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>AI Pipeline</span>
                             <div className="mt-2">
-                                <p className="text-lg font-black text-white">99.8%</p>
-                                <div className="w-full bg-white/10 rounded-full h-1 mt-1">
-                                    <div className="bg-cyan-400 h-full rounded-full" style={{ width: "99.8%" }} />
+                                <p className="text-lg font-black" style={{ color: T.text }}>99.8%</p>
+                                <div className="w-full rounded-full h-1 mt-1" style={{ background: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)" }}>
+                                    <div className="bg-cyan-500 h-full rounded-full" style={{ width: "99.8%" }} />
                                 </div>
-                                <p className="text-[9px] text-cyan-300 font-bold mt-1">Optimal State</p>
+                                <p className="text-[9px] font-bold mt-1" style={{ color: isDark ? "#67e8f9" : "#0891b2" }}>Optimal State</p>
                             </div>
                         </div>
 
-                        <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex flex-col justify-between col-span-2 sm:col-span-1">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Risk Flags</span>
+                        <div className="p-3 rounded-xl flex flex-col justify-between col-span-2 sm:col-span-1"
+                            style={{
+                                background: isDark ? "rgba(255,255,255,0.05)" : "#ffffff",
+                                border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#e2e8f0"}`,
+                                boxShadow: isDark ? "none" : "0 1px 2px rgba(0,0,0,0.03)"
+                            }}>
+                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Risk Flags</span>
                             <div className="mt-2">
-                                <p className="text-lg font-black text-amber-400">{companyStats?.riskFlagsCount ?? companyStats?.coachingNeededCount ?? 0}</p>
-                                <div className="w-full bg-white/10 rounded-full h-1 mt-1">
-                                    <div className="bg-amber-400 h-full rounded-full" style={{ width: `${Math.min(100, (companyStats?.riskFlagsCount ?? companyStats?.coachingNeededCount ?? 0) * 20)}%` }} />
+                                <p className="text-lg font-black text-amber-500">{companyStats?.riskFlagsCount ?? companyStats?.coachingNeededCount ?? 0}</p>
+                                <div className="w-full rounded-full h-1 mt-1" style={{ background: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)" }}>
+                                    <div className="bg-amber-500 h-full rounded-full" style={{ width: `${Math.min(100, (companyStats?.riskFlagsCount ?? companyStats?.coachingNeededCount ?? 0) * 20)}%` }} />
                                 </div>
-                                <p className="text-[9px] text-amber-300 font-bold mt-1">
+                                <p className="text-[9px] font-bold mt-1" style={{ color: isDark ? "#fcd34d" : "#d97706" }}>
                                     {(companyStats?.riskFlagsCount ?? 0) === 0 ? "No Active Risks" : (companyStats?.riskFlagsCount ?? 0) <= 2 ? "Low Risk Level" : "Moderate Risk"}
                                 </p>
                             </div>
@@ -1364,37 +1562,49 @@ function OwnerDashboardView({
 
             {/* 3. EXECUTIVE INTELLIGENCE PANEL (P0 - Gong / McKinsey Board Briefing) */}
             <div className="p-6 rounded-2xl border relative overflow-hidden space-y-5"
-                style={{ background: "linear-gradient(160deg, rgba(30,27,75,0.75) 0%, rgba(15,23,42,0.9) 100%)", borderColor: "rgba(139,92,246,0.3)" }}>
+                style={{
+                    background: isDark
+                        ? "linear-gradient(160deg, rgba(30,27,75,0.75) 0%, rgba(15,23,42,0.9) 100%)"
+                        : "#ffffff",
+                    borderColor: isDark ? "rgba(139,92,246,0.3)" : "#e2e8f0",
+                    boxShadow: isDark ? "none" : "0 1px 3px rgba(0,0,0,0.04)"
+                }}>
                 
                 {/* Panel Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-white/10">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b"
+                    style={{ borderColor: T.divider }}>
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
                             style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)", boxShadow: "0 0 20px rgba(124,58,237,0.4)" }}>
                             <Brain size={20} className="text-white" />
                         </div>
                         <div>
-                            <h3 className="text-base font-bold text-white flex items-center gap-2">
+                            <h3 className="text-base font-bold flex items-center gap-2" style={{ color: T.text }}>
                                 Executive Intelligence
                                 {briefingData?.isCached && (
-                                    <span className="px-2 py-0.5 rounded-md text-[9px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                                    <span className="px-2 py-0.5 rounded-md text-[9px] font-semibold"
+                                        style={{
+                                            background: isDark ? "#1e293b" : "#f1f5f9",
+                                            color: isDark ? "#cbd5e1" : "#475569",
+                                            border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`
+                                        }}>
                                         Cached 4h
                                     </span>
                                 )}
                             </h3>
-                            <div className="flex items-center gap-3 text-[11px] text-slate-400 mt-0.5 flex-wrap">
-                                <span className="flex items-center gap-1">
-                                    <CalendarDays size={12} className="text-violet-400" />
-                                    Last 7 Days
+                            <div className="flex items-center gap-3 text-[11px] mt-0.5 flex-wrap" style={{ color: T.textMuted }}>
+                                <span className="flex items-center gap-1 font-semibold" style={{ color: isDark ? "#cbd5e1" : "#334155" }}>
+                                    <CalendarDays size={12} className="text-violet-500" />
+                                    {dateRange === "7d" ? "Last 7 Days" : dateRange === "all" ? "All Time" : "Last 30 Days"}
                                 </span>
                                 <span>•</span>
                                 <span className="flex items-center gap-1">
-                                    <Phone size={12} className="text-blue-400" />
-                                    {totalCalls} Conversations
+                                    <Phone size={12} className="text-blue-500" />
+                                    {companyStats?.totalCalls ?? rangedCalls.length} Conversations
                                 </span>
                                 <span>•</span>
                                 <span className="flex items-center gap-1">
-                                    <Clock size={12} className="text-emerald-400" />
+                                    <Clock size={12} className="text-emerald-500" />
                                     Updated recently
                                 </span>
                             </div>
@@ -1406,14 +1616,14 @@ function OwnerDashboardView({
                 {briefingLoading && (
                     <div className="space-y-4 animate-pulse">
                         <div className="space-y-2">
-                            <div className="h-4 bg-slate-700/50 rounded w-full" />
-                            <div className="h-4 bg-slate-700/40 rounded w-5/6" />
-                            <div className="h-4 bg-slate-700/30 rounded w-4/6" />
+                            <div className="h-4 rounded w-full" style={{ background: isDark ? "rgba(255,255,255,0.06)" : "#f1f5f9" }} />
+                            <div className="h-4 rounded w-5/6" style={{ background: isDark ? "rgba(255,255,255,0.05)" : "#f1f5f9" }} />
+                            <div className="h-4 rounded w-4/6" style={{ background: isDark ? "rgba(255,255,255,0.04)" : "#f1f5f9" }} />
                         </div>
-                        <div className="h-[1px] bg-white/10" />
+                        <div className="h-[1px]" style={{ background: T.divider }} />
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             {[1, 2, 3].map(i => (
-                                <div key={i} className="h-16 bg-slate-700/30 rounded-xl" />
+                                <div key={i} className="h-16 rounded-xl" style={{ background: isDark ? "rgba(255,255,255,0.04)" : "#f8fafc" }} />
                             ))}
                         </div>
                     </div>
@@ -1421,11 +1631,18 @@ function OwnerDashboardView({
 
                 {/* Error / Offline Card */}
                 {!briefingLoading && (briefingError || !briefingData) && (
-                    <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-3 text-xs text-amber-300">
-                        <AlertTriangle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                    <div className="p-4 rounded-xl flex items-start gap-3 text-xs"
+                        style={{
+                            background: isDark ? "rgba(245,158,11,0.1)" : "#fffbeb",
+                            border: `1px solid ${isDark ? "rgba(245,158,11,0.25)" : "#fde68a"}`,
+                            color: isDark ? "#fcd34d" : "#92400e"
+                        }}>
+                        <AlertTriangle size={18} className="text-amber-500 flex-shrink-0 mt-0.5" />
                         <div>
-                            <p className="font-bold text-amber-200">Executive briefing engine is temporarily offline.</p>
-                            <p className="text-slate-400 text-[11px] mt-0.5">The Groq synthesis pipeline could not analyze recent activity at this time. Standard analytics remain fully functional.</p>
+                            <p className="font-bold">Executive briefing engine is temporarily offline.</p>
+                            <p className="text-[11px] mt-0.5" style={{ color: T.textMuted }}>
+                                The Groq synthesis pipeline could not analyze recent activity at this time. Standard analytics remain fully functional.
+                            </p>
                         </div>
                     </div>
                 )}
@@ -1435,23 +1652,29 @@ function OwnerDashboardView({
                     <div className="space-y-5">
                         {/* Section 1: Executive Summary Narrative */}
                         <div className="space-y-2">
-                            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-300">
-                                <Sparkles size={13} className="text-violet-400" />
+                            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider"
+                                style={{ color: isDark ? "#c4b5fd" : "#7c3aed" }}>
+                                <Sparkles size={13} className="text-violet-500" />
                                 <span>Executive Briefing</span>
                             </div>
-                            <p className="text-slate-200 text-xs sm:text-sm leading-relaxed font-medium bg-white/[0.02] p-4 rounded-xl border border-white/5">
+                            <p className="text-xs sm:text-sm leading-relaxed font-medium p-4 rounded-xl"
+                                style={{
+                                    background: isDark ? "rgba(255,255,255,0.02)" : "rgba(245,243,255,0.6)",
+                                    border: `1px solid ${isDark ? "rgba(255,255,255,0.05)" : "#ede9fe"}`,
+                                    color: isDark ? "#e2e8f0" : "#1e1b4b"
+                                }}>
                                 {briefingData.summary || `Sales quality remained stable this week with an average QA score of ${avgScore} across ${totalCalls} analyzed conversations. Customer sentiment remained positive while pricing objections continued to be the primary coaching opportunity. No high-risk representatives were detected. Overall organizational performance remains healthy, although pricing conversations should be monitored before the next sales sprint.`}
                             </p>
                         </div>
 
                         {/* Divider */}
-                        <div className="h-[1px] bg-white/10" />
+                        <div className="h-[1px]" style={{ background: T.divider }} />
 
                         {/* Section 2: Key Findings */}
                         {((briefingData.findings && briefingData.findings.length > 0) || companyStats) && (
                             <div className="space-y-2.5">
-                                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
-                                    <Activity size={13} className="text-emerald-400" />
+                                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>
+                                    <Activity size={13} className="text-emerald-500" />
                                     <span>Key Findings</span>
                                 </div>
 
@@ -1462,29 +1685,55 @@ function OwnerDashboardView({
                                         { status: "POSITIVE", title: "Representative Coaching Backlog", detail: "Zero representatives currently fall below the critical threshold.", metric: "0 At-Risk Reps" }
                                     ]).map((finding, fIdx) => {
                                         const statusConfig = {
-                                            POSITIVE: { icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20" },
-                                            WARNING: { icon: AlertTriangle, color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/20" },
-                                            CRITICAL: { icon: AlertOctagon, color: "text-rose-400", bg: "bg-rose-500/10 border-rose-500/20" },
-                                            NEUTRAL: { icon: Info, color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" }
+                                            POSITIVE: {
+                                                icon: CheckCircle2,
+                                                color: "text-emerald-500",
+                                                bg: isDark ? "rgba(16,185,129,0.1)" : "#ecfdf5",
+                                                border: isDark ? "rgba(16,185,129,0.25)" : "#a7f3d0"
+                                            },
+                                            WARNING: {
+                                                icon: AlertTriangle,
+                                                color: "text-amber-500",
+                                                bg: isDark ? "rgba(245,158,11,0.1)" : "#fffbeb",
+                                                border: isDark ? "rgba(245,158,11,0.25)" : "#fde68a"
+                                            },
+                                            CRITICAL: {
+                                                icon: AlertOctagon,
+                                                color: "text-rose-500",
+                                                bg: isDark ? "rgba(239,68,68,0.1)" : "#fff1f2",
+                                                border: isDark ? "rgba(239,68,68,0.25)" : "#fecdd3"
+                                            },
+                                            NEUTRAL: {
+                                                icon: Info,
+                                                color: "text-blue-500",
+                                                bg: isDark ? "rgba(59,130,246,0.1)" : "#eff6ff",
+                                                border: isDark ? "rgba(59,130,246,0.25)" : "#bfdbfe"
+                                            }
                                         };
                                         const stKey = (finding.status || "POSITIVE").toUpperCase();
                                         const st = statusConfig[stKey] || statusConfig.POSITIVE;
                                         const StatusIcon = st.icon;
 
                                         return (
-                                            <div key={fIdx} className={`p-3.5 rounded-xl border ${st.bg} flex flex-col justify-between space-y-2 transition-all hover:bg-white/[0.05]`}>
+                                            <div key={fIdx} className="p-3.5 rounded-xl flex flex-col justify-between space-y-2 transition-all hover:opacity-90"
+                                                style={{ background: st.bg, border: `1px solid ${st.border}` }}>
                                                 <div className="flex items-center justify-between gap-2">
                                                     <div className="flex items-center gap-1.5">
                                                         <StatusIcon size={14} className={st.color} />
-                                                        <span className="font-bold text-white text-xs">{finding.title}</span>
+                                                        <span className="font-bold text-xs" style={{ color: T.text }}>{finding.title}</span>
                                                     </div>
                                                     {finding.metric && (
-                                                        <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-white/10 text-slate-200 border border-white/10">
+                                                        <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold"
+                                                            style={{
+                                                                background: isDark ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.85)",
+                                                                color: T.text,
+                                                                border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)"}`
+                                                            }}>
                                                             {finding.metric}
                                                         </span>
                                                     )}
                                                 </div>
-                                                <p className="text-[11px] text-slate-300 leading-snug">
+                                                <p className="text-[11px] leading-snug" style={{ color: T.textMuted }}>
                                                     {finding.detail}
                                                 </p>
                                             </div>
@@ -1495,21 +1744,26 @@ function OwnerDashboardView({
                         )}
 
                         {/* Divider */}
-                        <div className="h-[1px] bg-white/10" />
+                        <div className="h-[1px]" style={{ background: T.divider }} />
 
                         {/* Section 3: Leadership Recommendation */}
-                        <div className="p-4 rounded-xl bg-violet-500/10 border border-violet-500/20 space-y-3">
-                            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-300">
-                                <Target size={14} className="text-violet-400" />
+                        <div className="p-4 rounded-xl space-y-3"
+                            style={{
+                                background: isDark ? "rgba(139,92,246,0.1)" : "linear-gradient(135deg, #f5f3ff 0%, #eff6ff 100%)",
+                                border: `1px solid ${isDark ? "rgba(139,92,246,0.25)" : "#ddd6fe"}`
+                            }}>
+                            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider"
+                                style={{ color: isDark ? "#c4b5fd" : "#7c3aed" }}>
+                                <Target size={14} className="text-violet-500" />
                                 <span>Leadership Recommendation</span>
                             </div>
 
-                            <p className="text-white font-bold text-xs sm:text-sm">
+                            <p className="font-bold text-xs sm:text-sm" style={{ color: isDark ? "#ffffff" : "#4c1d95" }}>
                                 {briefingData.recommendation?.title || "Run a focused pricing-objection workshop before next week's outbound campaign"}
                             </p>
 
                             <div className="space-y-1">
-                                <p className="text-[10px] uppercase font-extrabold tracking-wider text-slate-400 mb-1.5">
+                                <p className="text-[10px] uppercase font-extrabold tracking-wider mb-1.5" style={{ color: T.textFaint }}>
                                     Expected Business Outcomes:
                                 </p>
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1518,8 +1772,13 @@ function OwnerDashboardView({
                                         "Better objection handling during initial contract reviews",
                                         "Reduced discounting pressure in competitive opportunities"
                                     ]).map((outcome, oIdx) => (
-                                        <div key={oIdx} className="flex items-center gap-2 text-[11px] text-slate-300 bg-white/5 p-2 rounded-lg border border-white/5">
-                                            <Check size={13} className="text-emerald-400 flex-shrink-0" />
+                                        <div key={oIdx} className="flex items-center gap-2 text-[11px] p-2 rounded-lg"
+                                            style={{
+                                                background: isDark ? "rgba(255,255,255,0.05)" : "#ffffff",
+                                                border: `1px solid ${isDark ? "rgba(255,255,255,0.05)" : "#e0e7ff"}`,
+                                                color: isDark ? "#cbd5e1" : "#334155"
+                                            }}>
+                                            <Check size={13} className="text-emerald-500 flex-shrink-0" />
                                             <span>{outcome}</span>
                                         </div>
                                     ))}
@@ -1533,41 +1792,43 @@ function OwnerDashboardView({
             {/* 4. COMPANY KPIs GRID (8 Executive KPI Cards with Data-Driven Sparklines) */}
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
                 {/* Org Health */}
-                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between"
+                    style={{ background: T.panel, borderColor: T.panelBorder, boxShadow: T.cardShadow }}>
                     <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Org Health</span>
-                        <Activity size={12} className="text-emerald-400" />
+                        <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Org Health</span>
+                        <Activity size={12} className="text-emerald-500" />
                     </div>
                     <div className="my-2">
-                        <p className="text-xl font-black text-white">{orgHealth}<span className="text-[10px] text-slate-500">/100</span></p>
-                        <p className="text-[9px] text-emerald-400 font-bold mt-0.5">↑ 4.2%</p>
+                        <p className="text-xl font-black" style={{ color: T.text }}>{orgHealth}<span className="text-[10px] font-normal" style={{ color: T.textFaint }}>/100</span></p>
+                        <p className="text-[9px] font-bold mt-0.5" style={{ color: isDark ? "#34d399" : "#059669" }}>↑ {orgHealthDelta}</p>
                     </div>
                     <Sparkline data={dailyMetrics.length > 0 ? dailyMetrics.map(d => d.organizationHealth) : null} color="#10b981" />
                 </div>
 
                 {/* Pipeline Covered KPI */}
-                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between"
+                    style={{ background: T.panel, borderColor: T.panelBorder, boxShadow: T.cardShadow }}>
                     <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Pipeline Covered</span>
-                        <DollarSign size={12} className="text-violet-400" />
+                        <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Pipeline Covered</span>
+                        <DollarSign size={12} className="text-violet-500" />
                     </div>
                     <div className="my-2 flex-1 flex flex-col justify-center">
                         {pipelineLoading ? (
-                            <p className="text-xs text-slate-500 animate-pulse">Loading...</p>
+                            <p className="text-xs animate-pulse" style={{ color: T.textFaint }}>Loading...</p>
                         ) : !pipelineData || (pipelineData.openDealCount === 0 && pipelineData.wonDealCount === 0 && pipelineData.lostDealCount === 0) ? (
                             <div className="space-y-1 mt-1">
-                                <p className="text-xs font-bold text-slate-400">No pipeline data yet</p>
-                                <p className="text-[9px] text-slate-500 leading-tight">Add deal values to analyzed calls to start tracking.</p>
+                                <p className="text-xs font-bold" style={{ color: T.textMuted }}>No pipeline data</p>
+                                <p className="text-[9px] leading-tight" style={{ color: T.textFaint }}>Add deal values to tracked calls.</p>
                             </div>
                         ) : pipelineData.openDealCount === 0 ? (
                             <div className="space-y-1">
-                                <p className="text-xs font-bold text-slate-400">No open pipeline</p>
+                                <p className="text-xs font-bold" style={{ color: T.textMuted }}>No open pipeline</p>
                                 {pipelineData.wonDealCount > 0 && (
                                     <div>
-                                        <p className="text-lg font-black text-emerald-400">
+                                        <p className="text-lg font-black text-emerald-500">
                                             {formatCurrency(pipelineData.closedWon)}
                                         </p>
-                                        <p className="text-[9px] text-emerald-300 font-bold mt-0.5">
+                                        <p className="text-[9px] font-bold mt-0.5" style={{ color: isDark ? "#6ee7b7" : "#059669" }}>
                                             {pipelineData.wonDealCount} Closed Won Deal{pipelineData.wonDealCount > 1 ? "s" : ""}
                                         </p>
                                     </div>
@@ -1575,15 +1836,15 @@ function OwnerDashboardView({
                             </div>
                         ) : (
                             <div>
-                                <p className="text-xl font-black text-white">
+                                <p className="text-xl font-black" style={{ color: T.text }}>
                                     {formatCurrency(pipelineData.pipelineCovered)}
                                 </p>
-                                <p className="text-[9px] text-violet-300 font-bold mt-0.5">
+                                <p className="text-[9px] font-bold mt-0.5" style={{ color: isDark ? "#c4b5fd" : "#7c3aed" }}>
                                     {pipelineData.openDealCount} Open Deal{pipelineData.openDealCount > 1 ? "s" : ""}
                                 </p>
                                 {pipelineData.wonDealCount > 0 && (
-                                    <p className="text-[9px] text-emerald-400 font-bold mt-0.5">
-                                        Closed Won: {formatCurrency(pipelineData.closedWon)} ({pipelineData.wonDealCount} Won)
+                                    <p className="text-[9px] font-bold mt-0.5" style={{ color: isDark ? "#34d399" : "#059669" }}>
+                                        Won: {formatCurrency(pipelineData.closedWon)}
                                     </p>
                                 )}
                             </div>
@@ -1593,27 +1854,29 @@ function OwnerDashboardView({
                 </div>
 
                 {/* Average QA */}
-                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between"
+                    style={{ background: T.panel, borderColor: T.panelBorder, boxShadow: T.cardShadow }}>
                     <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Avg QA Score</span>
-                        <Star size={12} className="text-blue-400" />
+                        <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Avg QA Score</span>
+                        <Star size={12} className="text-blue-500" />
                     </div>
                     <div className="my-2">
-                        <p className="text-xl font-black text-white">{avgScore}</p>
-                        <p className="text-[9px] text-blue-300 font-bold mt-0.5">Grade A</p>
+                        <p className="text-xl font-black" style={{ color: T.text }}>{avgScore}</p>
+                        <p className="text-[9px] font-bold mt-0.5" style={{ color: isDark ? "#93c5fd" : "#2563eb" }}>Grade A</p>
                     </div>
                     <Sparkline data={dailyMetrics.length > 0 ? dailyMetrics.map(d => d.avgQaScore) : null} color="#3b82f6" />
                 </div>
 
                 {/* Risk Flags */}
-                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between"
+                    style={{ background: T.panel, borderColor: T.panelBorder, boxShadow: T.cardShadow }}>
                     <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Risk Flags</span>
-                        <ShieldAlert size={12} className="text-amber-400" />
+                        <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Risk Flags</span>
+                        <ShieldAlert size={12} className="text-amber-500" />
                     </div>
                     <div className="my-2">
-                        <p className="text-xl font-black text-amber-400">{companyStats?.riskFlagsCount ?? companyStats?.coachingNeededCount ?? 0}</p>
-                        <p className="text-[9px] text-emerald-400 font-bold mt-0.5">
+                        <p className="text-xl font-black text-amber-500">{companyStats?.riskFlagsCount ?? companyStats?.coachingNeededCount ?? 0}</p>
+                        <p className="text-[9px] font-bold mt-0.5" style={{ color: isDark ? "#34d399" : "#059669" }}>
                             {(companyStats?.coachingNeededCount || 0) > 0 ? `${companyStats.coachingNeededCount} Rep${companyStats.coachingNeededCount > 1 ? "s" : ""} need coaching` : "0 At-Risk Reps"}
                         </p>
                     </div>
@@ -1621,66 +1884,68 @@ function OwnerDashboardView({
                 </div>
 
                 {/* Active Members */}
-                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between"
+                    style={{ background: T.panel, borderColor: T.panelBorder, boxShadow: T.cardShadow }}>
                     <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Active Members</span>
-                        <Users size={12} className="text-purple-400" />
+                        <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Active Members</span>
+                        <Users size={12} className="text-purple-500" />
                     </div>
                     <div className="my-2">
-                        <p className="text-xl font-black text-white">{activeSeats}</p>
-                        <p className="text-[9px] text-purple-300 font-bold mt-0.5">Active Reps</p>
+                        <p className="text-xl font-black" style={{ color: T.text }}>{activeSeats}</p>
+                        <p className="text-[9px] font-bold mt-0.5" style={{ color: isDark ? "#d8b4fe" : "#9333ea" }}>Active Reps</p>
                     </div>
                     <Sparkline data={null} color="#a78bfa" />
                 </div>
 
                 {/* Seat Utilization */}
-                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between"
+                    style={{ background: T.panel, borderColor: T.panelBorder, boxShadow: T.cardShadow }}>
                     <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Seat Utilization</span>
-                        <CreditCard size={12} className="text-indigo-400" />
+                        <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Seat Utilization</span>
+                        <CreditCard size={12} className="text-indigo-500" />
                     </div>
                     <div className="my-2">
-                        <p className="text-xl font-black text-white">{seatPct}%</p>
-                        <p className="text-[9px] text-slate-400 font-medium mt-0.5">{activeSeats}/{seatLimit} Seats</p>
+                        <p className="text-xl font-black" style={{ color: T.text }}>{seatPct}%</p>
+                        <p className="text-[9px] font-medium mt-0.5" style={{ color: T.textMuted }}>{activeSeats}/{seatLimit} Seats</p>
                     </div>
                     <Sparkline data={null} color="#6366f1" />
                 </div>
 
                 {/* AI Success */}
-                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between"
+                    style={{ background: T.panel, borderColor: T.panelBorder, boxShadow: T.cardShadow }}>
                     <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">AI Success Rate</span>
-                        <Cpu size={12} className="text-cyan-400" />
+                        <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>AI Success Rate</span>
+                        <Cpu size={12} className="text-cyan-500" />
                     </div>
                     <div className="my-2">
-                        <p className="text-xl font-black text-white">100%</p>
-                        <p className="text-[9px] text-cyan-300 font-bold mt-0.5">Pipeline Active</p>
+                        <p className="text-xl font-black" style={{ color: T.text }}>100%</p>
+                        <p className="text-[9px] font-bold mt-0.5" style={{ color: isDark ? "#67e8f9" : "#0891b2" }}>Pipeline Active</p>
                     </div>
                     <Sparkline data={null} color="#06b6d4" />
                 </div>
 
-                {/* ── MEDIA LIBRARY ─────────────────────────────────────────────────────── */}
-                {/* Replaces hardcoded "Storage Usage 4.2 GB of 50 GB" — all values are     */}
-                {/* derived from real call_records metadata, never from Cloudinary Admin API */}
-                <div className="p-3.5 rounded-xl border flex flex-col justify-between" style={{ background: T.panel, borderColor: T.panelBorder }}>
+                {/* Media Library */}
+                <div className="p-3.5 rounded-xl border flex flex-col justify-between"
+                    style={{ background: T.panel, borderColor: T.panelBorder, boxShadow: T.cardShadow }}>
                     <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Media Library</span>
-                        <HardDrive size={12} className="text-emerald-400" />
+                        <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>Media Library</span>
+                        <HardDrive size={12} className="text-emerald-500" />
                     </div>
 
                     {/* Loading skeleton */}
                     {mediaLibraryLoading && (
                         <div className="my-2 space-y-1.5">
-                            <div className="h-6 w-10 rounded-md animate-pulse" style={{ background: "rgba(255,255,255,0.08)" }} />
-                            <div className="h-2.5 w-20 rounded animate-pulse" style={{ background: "rgba(255,255,255,0.05)" }} />
-                            <div className="h-2 w-24 rounded animate-pulse mt-1" style={{ background: "rgba(255,255,255,0.04)" }} />
+                            <div className="h-6 w-10 rounded-md animate-pulse" style={{ background: isDark ? "rgba(255,255,255,0.08)" : "#f1f5f9" }} />
+                            <div className="h-2.5 w-20 rounded animate-pulse" style={{ background: isDark ? "rgba(255,255,255,0.05)" : "#f1f5f9" }} />
+                            <div className="h-2 w-24 rounded animate-pulse mt-1" style={{ background: isDark ? "rgba(255,255,255,0.04)" : "#f1f5f9" }} />
                         </div>
                     )}
 
                     {/* Error state */}
                     {!mediaLibraryLoading && mediaLibraryError && (
                         <div className="my-2">
-                            <p className="text-[10px] text-red-400 font-medium">Unable to load</p>
+                            <p className="text-[10px] text-red-500 font-medium">Unable to load</p>
                             <button
                                 onClick={() => {
                                     setMediaLibraryError(false);
@@ -1689,7 +1954,7 @@ function OwnerDashboardView({
                                         .then(res => { setMediaLibrary(res.data); setMediaLibraryLoading(false); })
                                         .catch(() => { setMediaLibraryError(true); setMediaLibraryLoading(false); });
                                 }}
-                                className="text-[9px] text-violet-400 hover:text-violet-300 font-bold mt-1 transition-colors"
+                                className="text-[9px] font-bold mt-1 transition-colors text-violet-600 dark:text-violet-400"
                             >
                                 Retry
                             </button>
@@ -1699,8 +1964,8 @@ function OwnerDashboardView({
                     {/* Empty state */}
                     {!mediaLibraryLoading && !mediaLibraryError && mediaLibrary && mediaLibrary.recordingCount === 0 && (
                         <div className="my-2">
-                            <p className="text-xl font-black text-white">0</p>
-                            <p className="text-[9px] text-slate-500 font-medium mt-0.5">No recordings yet</p>
+                            <p className="text-xl font-black" style={{ color: T.text }}>0</p>
+                            <p className="text-[9px] font-medium mt-0.5" style={{ color: T.textMuted }}>No recordings yet</p>
                         </div>
                     )}
 
@@ -1712,7 +1977,6 @@ function OwnerDashboardView({
                         const unknown    = mediaLibrary.unknownFileSizeCount;
                         const lastUpload = mediaLibrary.lastUploadAt;
 
-                        // Format bytes into human-readable string
                         const fmtBytes = (b) => {
                             if (!b || b === 0) return "0 B";
                             const units = ["B", "KB", "MB", "GB", "TB"];
@@ -1720,7 +1984,6 @@ function OwnerDashboardView({
                             return `${(b / Math.pow(1024, i)).toFixed(2)} ${units[i]}`;
                         };
 
-                        // Relative time helper
                         const relTime = (isoStr) => {
                             if (!isoStr) return null;
                             const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
@@ -1732,59 +1995,66 @@ function OwnerDashboardView({
 
                         return (
                             <div className="my-2">
-                                <p className="text-xl font-black text-white">{count.toLocaleString()}</p>
-                                <p className="text-[9px] text-emerald-400 font-bold mt-0.5">Recording{count !== 1 ? "s" : ""}</p>
+                                <p className="text-xl font-black" style={{ color: T.text }}>{count.toLocaleString()}</p>
+                                <p className="text-[9px] font-bold mt-0.5" style={{ color: isDark ? "#34d399" : "#059669" }}>
+                                    Recording{count !== 1 ? "s" : ""}
+                                </p>
 
-                                {/* Storage info */}
                                 {tracked > 0 ? (
-                                    <p className="text-[9px] text-slate-400 font-medium mt-1.5">
+                                    <p className="text-[9px] font-medium mt-1.5" style={{ color: T.textMuted }}>
                                         {fmtBytes(bytes)} tracked
-                                        {unknown > 0 && ` · ${unknown} without size`}
+                                        {unknown > 0 && ` · ${unknown} w/o size`}
                                     </p>
                                 ) : (
-                                    <p className="text-[9px] text-slate-500 font-medium mt-1.5">
-                                        Size unavailable for existing recordings
+                                    <p className="text-[9px] font-medium mt-1.5" style={{ color: T.textFaint }}>
+                                        Size unrecorded
                                     </p>
                                 )}
 
-                                {/* Last upload */}
                                 {lastUpload && (
-                                    <p className="text-[9px] text-slate-500 mt-0.5">
-                                        Last upload · {relTime(lastUpload)}
+                                    <p className="text-[9px] mt-0.5" style={{ color: T.textFaint }}>
+                                        Upload · {relTime(lastUpload)}
                                     </p>
                                 )}
                             </div>
                         );
                     })()}
 
-                    {/* No sparkline — upload frequency has no guaranteed trend */}
                     <div style={{ height: 20 }} />
                 </div>
             </div>
 
             {/* 5. REVENUE & QUALITY TREND HERO CHART (P0 - Visual Centerpiece) */}
             <Panel T={T} className="p-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-white/10">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b"
+                    style={{ borderColor: T.divider }}>
                     <div>
                         <div className="flex items-center gap-2">
-                            <TrendingUp size={18} className="text-violet-400" />
-                            <h3 className="text-base font-black text-white">Revenue & Quality Trend Intelligence</h3>
+                            <TrendingUp size={18} className="text-violet-500" />
+                            <h3 className="text-base font-black" style={{ color: T.text }}>Revenue & Quality Trend Intelligence</h3>
                         </div>
-                        <p className="text-xs text-slate-400 mt-0.5">{rangeLabel} performance velocity across call volume, QA score, and customer sentiment</p>
+                        <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>{rangeLabel} performance velocity across call volume, QA score, and customer sentiment</p>
                     </div>
 
                     {/* Metric Tabs */}
-                    <div className="flex items-center gap-1.5 p-1 rounded-xl bg-white/5 border border-white/10">
+                    <div className="flex items-center gap-1.5 p-1 rounded-xl"
+                        style={{
+                            background: isDark ? "rgba(255,255,255,0.05)" : "#f1f5f9",
+                            border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#e2e8f0"}`
+                        }}>
                         <button onClick={() => setChartMetric("volume")}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartMetric === "volume" ? "bg-violet-600 text-white shadow-md" : "text-slate-400 hover:text-white"}`}>
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartMetric === "volume" ? "bg-violet-600 text-white shadow-md" : "hover:opacity-90"}`}
+                            style={{ color: chartMetric === "volume" ? "#ffffff" : T.textMuted }}>
                             Call Volume
                         </button>
                         <button onClick={() => setChartMetric("qa")}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartMetric === "qa" ? "bg-blue-600 text-white shadow-md" : "text-slate-400 hover:text-white"}`}>
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartMetric === "qa" ? "bg-blue-600 text-white shadow-md" : "hover:opacity-90"}`}
+                            style={{ color: chartMetric === "qa" ? "#ffffff" : T.textMuted }}>
                             QA Score Trend
                         </button>
                         <button onClick={() => setChartMetric("sentiment")}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartMetric === "sentiment" ? "bg-emerald-600 text-white shadow-md" : "text-slate-400 hover:text-white"}`}>
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartMetric === "sentiment" ? "bg-emerald-600 text-white shadow-md" : "hover:opacity-90"}`}
+                            style={{ color: chartMetric === "sentiment" ? "#ffffff" : T.textMuted }}>
                             Sentiment Ratio
                         </button>
                     </div>
@@ -1794,8 +2064,8 @@ function OwnerDashboardView({
                 <div className="h-72 w-full">
                     {trendChartData.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center text-center p-6">
-                            <p className="text-sm font-bold text-slate-400">No trend data available for this range</p>
-                            <p className="text-xs text-slate-500 mt-1">Upload call recordings to begin tracking historical performance.</p>
+                            <p className="text-sm font-bold" style={{ color: T.textMuted }}>No trend data available for this range</p>
+                            <p className="text-xs mt-1" style={{ color: T.textFaint }}>Upload call recordings to begin tracking historical performance.</p>
                         </div>
                     ) : (
                         <ResponsiveContainer width="100%" height="100%">
@@ -1806,26 +2076,26 @@ function OwnerDashboardView({
                                         <stop offset="95%" stopColor={chartMetric === "volume" ? "#8b5cf6" : chartMetric === "qa" ? "#3b82f6" : "#10b981"} stopOpacity={0.0} />
                                     </linearGradient>
                                 </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "rgba(255,255,255,0.04)" : "#f1f5f9"} vertical={false} />
                                 <XAxis
                                     dataKey="date"
                                     ticks={optimalDateTicks}
                                     interval={0}
-                                    stroke="rgba(255,255,255,0.08)"
+                                    stroke={isDark ? "rgba(255,255,255,0.08)" : "#cbd5e1"}
                                     tickLine={false}
-                                    axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                                    tick={{ fontSize: 11, fill: "#94a3b8", fontWeight: 500 }}
+                                    axisLine={{ stroke: isDark ? "rgba(255,255,255,0.08)" : "#e2e8f0" }}
+                                    tick={{ fontSize: 11, fill: isDark ? "#94a3b8" : "#64748b", fontWeight: 500 }}
                                     dy={8}
                                 />
                                 <YAxis
-                                    stroke="rgba(255,255,255,0.08)"
+                                    stroke={isDark ? "rgba(255,255,255,0.08)" : "#cbd5e1"}
                                     tickLine={false}
                                     axisLine={false}
-                                    tick={{ fontSize: 11, fill: "#64748b", fontWeight: 500 }}
+                                    tick={{ fontSize: 11, fill: isDark ? "#64748b" : "#94a3b8", fontWeight: 500 }}
                                     dx={-4}
                                 />
                                 <Tooltip
-                                    cursor={{ stroke: "rgba(255,255,255,0.12)", strokeDasharray: "4 4", strokeWidth: 1 }}
+                                    cursor={{ stroke: isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)", strokeDasharray: "4 4", strokeWidth: 1 }}
                                     content={({ active, payload, label }) => {
                                         if (!active || !payload || !payload.length) return null;
                                         const item = payload[0];
@@ -1836,15 +2106,15 @@ function OwnerDashboardView({
                                         return (
                                             <div className="px-3.5 py-2.5 rounded-xl border backdrop-blur-xl shadow-2xl"
                                                 style={{
-                                                    backgroundColor: "rgba(11, 15, 25, 0.95)",
-                                                    borderColor: "rgba(255, 255, 255, 0.12)",
-                                                    boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 0 15px rgba(139, 92, 246, 0.1)"
+                                                    backgroundColor: T.popoverBg,
+                                                    borderColor: T.popoverBorder,
+                                                    boxShadow: T.popoverShadow
                                                 }}>
-                                                <p className="text-[11px] font-bold text-slate-400 mb-1.5">{label}</p>
+                                                <p className="text-[11px] font-bold mb-1.5" style={{ color: T.textFaint }}>{label}</p>
                                                 <div className="flex items-center gap-2">
                                                     <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
-                                                    <span className="text-xs text-slate-300 font-medium">{metricName}:</span>
-                                                    <span className="text-xs font-black text-white">{val} <span className="text-[10px] font-normal text-slate-400">{unit}</span></span>
+                                                    <span className="text-xs font-medium" style={{ color: T.textMuted }}>{metricName}:</span>
+                                                    <span className="text-xs font-black" style={{ color: T.text }}>{val} <span className="text-[10px] font-normal" style={{ color: T.textFaint }}>{unit}</span></span>
                                                 </div>
                                             </div>
                                         );
@@ -1865,34 +2135,50 @@ function OwnerDashboardView({
                 </div>
 
                 {/* Hero Stats Footer */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 mt-4 border-t border-white/10 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 mt-4 border-t text-xs"
+                    style={{ borderColor: T.divider }}>
                     <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-300 font-bold">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold flex-shrink-0"
+                            style={{
+                                background: isDark ? "rgba(139,92,246,0.15)" : "#f5f3ff",
+                                border: `1px solid ${isDark ? "rgba(139,92,246,0.3)" : "#ddd6fe"}`,
+                                color: isDark ? "#c4b5fd" : "#7c3aed"
+                            }}>
                             <Phone size={14} />
                         </div>
                         <div>
-                            <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Total Calls Analysed</span>
-                            <p className="text-sm font-black text-white">{companyStats?.totalCalls ?? totalCalls} Conversations</p>
+                            <span className="text-[10px] uppercase font-bold tracking-wider" style={{ color: T.textFaint }}>Total Calls Analysed</span>
+                            <p className="text-sm font-black" style={{ color: T.text }}>{companyStats?.totalCalls ?? totalCalls} Conversations</p>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-300 font-bold">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold flex-shrink-0"
+                            style={{
+                                background: isDark ? "rgba(59,130,246,0.15)" : "#eff6ff",
+                                border: `1px solid ${isDark ? "rgba(59,130,246,0.3)" : "#bfdbfe"}`,
+                                color: isDark ? "#93c5fd" : "#2563eb"
+                            }}>
                             <Star size={14} />
                         </div>
                         <div>
-                            <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">{rangeLabel.toUpperCase()} Avg QA Standard</span>
-                            <p className="text-sm font-black text-white">{avgScore} / 100 Grade A</p>
+                            <span className="text-[10px] uppercase font-bold tracking-wider" style={{ color: T.textFaint }}>{rangeLabel.toUpperCase()} Avg QA Standard</span>
+                            <p className="text-sm font-black" style={{ color: T.text }}>{avgScore} / 100 Grade A</p>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-300 font-bold">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold flex-shrink-0"
+                            style={{
+                                background: isDark ? "rgba(16,185,129,0.15)" : "#ecfdf5",
+                                border: `1px solid ${isDark ? "rgba(16,185,129,0.3)" : "#a7f3d0"}`,
+                                color: isDark ? "#6ee7b7" : "#059669"
+                            }}>
                             <Smile size={14} />
                         </div>
                         <div>
-                            <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Positive Sentiment Ratio</span>
-                            <p className="text-sm font-black text-white">{posPct}% Positive Conversations</p>
+                            <span className="text-[10px] uppercase font-bold tracking-wider" style={{ color: T.textFaint }}>Positive Sentiment Ratio</span>
+                            <p className="text-sm font-black" style={{ color: T.text }}>{posPct}% Positive Conversations</p>
                         </div>
                     </div>
                 </div>
@@ -1904,18 +2190,28 @@ function OwnerDashboardView({
                 <Panel T={T} className="lg:col-span-7 p-5">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                         <div className="flex items-center gap-2">
-                            <ShieldAlert size={16} className="text-rose-400" />
-                            <h3 className="text-sm font-bold text-white">Company Alert Center</h3>
-                            <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                            <ShieldAlert size={16} className="text-rose-500" />
+                            <h3 className="text-sm font-bold" style={{ color: T.text }}>Company Alert Center</h3>
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-bold"
+                                style={{
+                                    background: isDark ? "rgba(239,68,68,0.2)" : "#fff1f2",
+                                    color: isDark ? "#fca5a5" : "#e11d48",
+                                    border: `1px solid ${isDark ? "rgba(239,68,68,0.3)" : "#fecdd3"}`
+                                }}>
                                 {alerts.length} Active Feeds
                             </span>
                         </div>
 
                         {/* Filter tabs */}
-                        <div className="flex items-center gap-1 p-1 rounded-lg bg-white/5 border border-white/10 text-[10px] font-bold">
+                        <div className="flex items-center gap-1 p-1 rounded-lg text-[10px] font-bold"
+                            style={{
+                                background: isDark ? "rgba(255,255,255,0.05)" : "#f1f5f9",
+                                border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#e2e8f0"}`
+                            }}>
                             {["all", "critical", "warning", "system"].map(f => (
                                 <button key={f} onClick={() => setAlertFilter(f)}
-                                    className={`px-2 py-1 rounded transition-all capitalize ${alertFilter === f ? "bg-white/15 text-white" : "text-slate-400 hover:text-slate-200"}`}>
+                                    className={`px-2 py-1 rounded transition-all capitalize ${alertFilter === f ? (isDark ? "bg-white/15 text-white" : "bg-white text-slate-900 shadow-sm") : "text-slate-400 hover:opacity-80"}`}
+                                    style={{ color: alertFilter === f ? (isDark ? "#ffffff" : "#0f172a") : T.textMuted }}>
                                     {f}
                                 </button>
                             ))}
@@ -1924,32 +2220,38 @@ function OwnerDashboardView({
 
                     <div className="space-y-2.5">
                         {filteredAlerts.length === 0 ? (
-                            <div className="p-6 rounded-xl border border-dashed border-white/10 text-center text-slate-400 text-xs">
-                                <ShieldCheck size={24} className="mx-auto mb-2 text-emerald-400/70" />
-                                <p className="font-semibold text-slate-300">All systems healthy</p>
-                                <p className="text-[11px] text-slate-500 mt-0.5">No {alertFilter !== "all" ? alertFilter : "active"} risk alerts detected for this time window.</p>
+                            <div className="p-6 rounded-xl border border-dashed text-center text-xs"
+                                style={{ borderColor: T.divider, color: T.textMuted }}>
+                                <ShieldCheck size={24} className="mx-auto mb-2 text-emerald-500" />
+                                <p className="font-semibold" style={{ color: T.text }}>All systems healthy</p>
+                                <p className="text-[11px] mt-0.5" style={{ color: T.textFaint }}>
+                                    No {alertFilter !== "all" ? alertFilter : "active"} risk alerts detected for this time window.
+                                </p>
                             </div>
                         ) : (
                             filteredAlerts.map(a => (
-                                <div key={a.id} className="p-3.5 rounded-xl border flex items-start justify-between gap-3 transition-all hover:bg-white/5"
-                                    style={{ background: a.bg, borderColor: a.border }}>
+                                <div key={a.id} className="p-3.5 rounded-xl border flex items-start justify-between gap-3 transition-all hover:opacity-90"
+                                    style={{
+                                        background: isDark ? a.bg : a.severity === "critical" ? "#fff1f2" : a.severity === "warning" ? "#fffbeb" : "#ecfdf5",
+                                        borderColor: isDark ? a.border : a.severity === "critical" ? "#fecdd3" : a.severity === "warning" ? "#fde68a" : "#a7f3d0"
+                                    }}>
                                     <div className="flex items-start gap-3 min-w-0">
                                         <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
-                                            style={{ background: `${a.color}25`, border: `1px solid ${a.color}55` }}>
+                                            style={{ background: `${a.color}20`, border: `1px solid ${a.color}40` }}>
                                             <a.icon size={15} style={{ color: a.color }} />
                                         </div>
                                         <div className="min-w-0">
                                             <div className="flex items-center gap-2">
-                                                <p className="text-xs font-bold text-white truncate">{a.title}</p>
-                                                <span className="text-[9px] font-semibold text-slate-400 flex-shrink-0">{a.time}</span>
+                                                <p className="text-xs font-bold truncate" style={{ color: T.text }}>{a.title}</p>
+                                                <span className="text-[9px] font-semibold flex-shrink-0" style={{ color: T.textFaint }}>{a.time}</span>
                                             </div>
-                                            <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">{a.description}</p>
+                                            <p className="text-[11px] mt-0.5 leading-relaxed" style={{ color: T.textMuted }}>{a.description}</p>
                                         </div>
                                     </div>
 
                                     <Link to={a.link}
                                         className="px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex-shrink-0 transition-colors inline-flex items-center gap-1"
-                                        style={{ background: `${a.color}20`, color: a.color, border: `1px solid ${a.color}40` }}>
+                                        style={{ background: `${a.color}15`, color: a.color, border: `1px solid ${a.color}35` }}>
                                         {a.actionLabel} <ArrowUpRight size={10} />
                                     </Link>
                                 </div>
@@ -1963,72 +2265,103 @@ function OwnerDashboardView({
                     <div>
                         <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
-                                <Crown size={16} className="text-amber-400" />
-                                <h3 className="text-sm font-bold text-white">Executive Team Insights</h3>
+                                <Crown size={16} className="text-amber-500" />
+                                <h3 className="text-sm font-bold" style={{ color: T.text }}>Executive Team Insights</h3>
                             </div>
-                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{rangeLabel} Window</span>
+                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T.textFaint }}>{rangeLabel} Window</span>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                             {/* Top Performer */}
-                            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                                <span className="text-[9px] font-bold uppercase text-amber-400 tracking-wider flex items-center gap-1 mb-1">
+                            <div className="p-3 rounded-xl"
+                                style={{
+                                    background: isDark ? "rgba(245,158,11,0.1)" : "#fffbeb",
+                                    border: `1px solid ${isDark ? "rgba(245,158,11,0.25)" : "#fde68a"}`
+                                }}>
+                                <span className="text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 mb-1"
+                                    style={{ color: isDark ? "#fbbf24" : "#d97706" }}>
                                     <Crown size={10} /> Top Performer
                                 </span>
-                                <p className="font-bold text-white text-sm truncate">{topInsights.topPerformer?.employeeName || "No Data"}</p>
-                                <p className="text-[10px] text-amber-300/80 mt-0.5">{topInsights.topPerformer?.statusText || "No conversations in period"}</p>
+                                <p className="font-bold text-sm truncate" style={{ color: T.text }}>{topInsights.topPerformer?.employeeName || "No Data"}</p>
+                                <p className="text-[10px] mt-0.5" style={{ color: isDark ? "rgba(253,230,138,0.8)" : "#92400e" }}>{topInsights.topPerformer?.statusText || "No calls in period"}</p>
                             </div>
 
                             {/* Needs Coaching */}
-                            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20">
-                                <span className="text-[9px] font-bold uppercase text-rose-400 tracking-wider flex items-center gap-1 mb-1">
+                            <div className="p-3 rounded-xl"
+                                style={{
+                                    background: isDark ? "rgba(239,68,68,0.1)" : "#fff1f2",
+                                    border: `1px solid ${isDark ? "rgba(239,68,68,0.25)" : "#fecdd3"}`
+                                }}>
+                                <span className="text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 mb-1"
+                                    style={{ color: isDark ? "#f87171" : "#e11d48" }}>
                                     <AlertTriangle size={10} /> Needs Coaching
                                 </span>
-                                <p className="font-bold text-white text-sm truncate">{topInsights.needsCoaching?.employeeName || "All Reps On Track"}</p>
-                                <p className="text-[10px] text-rose-300/80 mt-0.5">{topInsights.needsCoaching?.statusText || "Quality standards met"}</p>
+                                <p className="font-bold text-sm truncate" style={{ color: T.text }}>{topInsights.needsCoaching?.employeeName || "All Reps On Track"}</p>
+                                <p className="text-[10px] mt-0.5" style={{ color: isDark ? "rgba(254,205,211,0.8)" : "#9f1239" }}>{topInsights.needsCoaching?.statusText || "Quality standards met"}</p>
                             </div>
 
                             {/* Most Improved */}
-                            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-                                <span className="text-[9px] font-bold uppercase text-emerald-400 tracking-wider flex items-center gap-1 mb-1">
+                            <div className="p-3 rounded-xl"
+                                style={{
+                                    background: isDark ? "rgba(16,185,129,0.1)" : "#ecfdf5",
+                                    border: `1px solid ${isDark ? "rgba(16,185,129,0.25)" : "#a7f3d0"}`
+                                }}>
+                                <span className="text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 mb-1"
+                                    style={{ color: isDark ? "#34d399" : "#059669" }}>
                                     <TrendingUp size={10} /> Most Improved
                                 </span>
-                                <p className="font-bold text-white text-sm truncate">{topInsights.mostImproved?.employeeName || "Baseline Establishing"}</p>
-                                <p className="text-[10px] text-emerald-300/80 mt-0.5">{topInsights.mostImproved?.statusText || "No prior comparison"}</p>
+                                <p className="font-bold text-sm truncate" style={{ color: T.text }}>{topInsights.mostImproved?.employeeName || "Baseline Establishing"}</p>
+                                <p className="text-[10px] mt-0.5" style={{ color: isDark ? "rgba(167,243,208,0.8)" : "#065f46" }}>{topInsights.mostImproved?.statusText || "No prior comparison"}</p>
                             </div>
 
                             {/* Highest Call Volume */}
-                            <div className="p-3 rounded-xl bg-violet-500/10 border border-violet-500/20">
-                                <span className="text-[9px] font-bold uppercase text-violet-400 tracking-wider flex items-center gap-1 mb-1">
-                                    <Phone size={10} /> Highest Call Volume
+                            <div className="p-3 rounded-xl"
+                                style={{
+                                    background: isDark ? "rgba(139,92,246,0.1)" : "#f5f3ff",
+                                    border: `1px solid ${isDark ? "rgba(139,92,246,0.25)" : "#ddd6fe"}`
+                                }}>
+                                <span className="text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 mb-1"
+                                    style={{ color: isDark ? "#c4b5fd" : "#7c3aed" }}>
+                                    <Phone size={10} /> Highest Volume
                                 </span>
-                                <p className="font-bold text-white text-sm truncate">{topInsights.highestVolume?.employeeName || (topPerformers[0]?.employeeName ?? "No Data")}</p>
-                                <p className="text-[10px] text-violet-300/80 mt-0.5">{topInsights.highestVolume?.statusText || (topPerformers[0] ? `${topPerformers[0].callCount} Conversations` : "0 conversations")}</p>
+                                <p className="font-bold text-sm truncate" style={{ color: T.text }}>{topInsights.highestVolume?.employeeName || (topPerformers[0]?.employeeName ?? "No Data")}</p>
+                                <p className="text-[10px] mt-0.5" style={{ color: isDark ? "rgba(221,214,254,0.8)" : "#5b21b6" }}>{topInsights.highestVolume?.statusText || (topPerformers[0] ? `${topPerformers[0].callCount} Conversations` : "0 conversations")}</p>
                             </div>
 
                             {/* Best QA Score */}
-                            <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
-                                <span className="text-[9px] font-bold uppercase text-blue-400 tracking-wider flex items-center gap-1 mb-1">
+                            <div className="p-3 rounded-xl"
+                                style={{
+                                    background: isDark ? "rgba(59,130,246,0.1)" : "#eff6ff",
+                                    border: `1px solid ${isDark ? "rgba(59,130,246,0.25)" : "#bfdbfe"}`
+                                }}>
+                                <span className="text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 mb-1"
+                                    style={{ color: isDark ? "#60a5fa" : "#2563eb" }}>
                                     <Star size={10} /> Best QA Score
                                 </span>
-                                <p className="font-bold text-white text-sm truncate">{topInsights.bestQA?.employeeName || (topPerformers[0]?.employeeName ?? "No Data")}</p>
-                                <p className="text-[10px] text-blue-300/80 mt-0.5">{topInsights.bestQA?.statusText || (topPerformers[0] ? `${topPerformers[0].avgScore?.toFixed(1)} / 100 Top Score` : "No scored calls")}</p>
+                                <p className="font-bold text-sm truncate" style={{ color: T.text }}>{topInsights.bestQA?.employeeName || (topPerformers[0]?.employeeName ?? "No Data")}</p>
+                                <p className="text-[10px] mt-0.5" style={{ color: isDark ? "rgba(191,219,254,0.8)" : "#1e40af" }}>{topInsights.bestQA?.statusText || (topPerformers[0] ? `${topPerformers[0].avgScore?.toFixed(1)} / 100 Top Score` : "No scored calls")}</p>
                             </div>
 
                             {/* Highest Positive Sentiment */}
-                            <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20">
-                                <span className="text-[9px] font-bold uppercase text-cyan-400 tracking-wider flex items-center gap-1 mb-1">
+                            <div className="p-3 rounded-xl"
+                                style={{
+                                    background: isDark ? "rgba(6,182,212,0.1)" : "#ecfeff",
+                                    border: `1px solid ${isDark ? "rgba(6,182,212,0.25)" : "#a5f3fc"}`
+                                }}>
+                                <span className="text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 mb-1"
+                                    style={{ color: isDark ? "#22d3ee" : "#0891b2" }}>
                                     <Smile size={10} /> Best Sentiment
                                 </span>
-                                <p className="font-bold text-white text-sm truncate">{topInsights.highestSentiment?.employeeName || (topPerformers[0]?.employeeName ?? "No Data")}</p>
-                                <p className="text-[10px] text-cyan-300/80 mt-0.5">{topInsights.highestSentiment?.posRatio || (posPct > 0 ? `${posPct}% Positive Ratio` : "No sentiment data")}</p>
+                                <p className="font-bold text-sm truncate" style={{ color: T.text }}>{topInsights.highestSentiment?.employeeName || (topPerformers[0]?.employeeName ?? "No Data")}</p>
+                                <p className="text-[10px] mt-0.5" style={{ color: isDark ? "rgba(165,243,252,0.8)" : "#155e75" }}>{topInsights.highestSentiment?.posRatio || (posPct > 0 ? `${posPct}% Positive Ratio` : "No sentiment data")}</p>
                             </div>
                         </div>
                     </div>
 
-                    <div className="pt-4 mt-4 border-t border-white/10 flex items-center justify-between text-xs">
-                        <span className="text-slate-400">Team Leadership Roster</span>
-                        <Link to={`/w/${companySlug}/company/members`} className="font-bold text-violet-400 hover:text-violet-300 flex items-center gap-1">
+                    <div className="pt-4 mt-4 border-t flex items-center justify-between text-xs"
+                        style={{ borderColor: T.divider }}>
+                        <span style={{ color: T.textMuted }}>Team Leadership Roster</span>
+                        <Link to={`/w/${companySlug}/company/members`} className="font-bold flex items-center gap-1 hover:underline text-violet-600 dark:text-violet-400">
                             View All Reps <ArrowRight size={11} />
                         </Link>
                     </div>
@@ -2037,23 +2370,137 @@ function OwnerDashboardView({
 
             {/* 7. RECENT COMPANY CALLS TABLE */}
             <Panel T={T} className="p-5">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                     <div>
-                        <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                            <Radio size={16} className="text-cyan-400" />
+                        <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: T.text }}>
+                            <Radio size={16} className="text-cyan-500" />
                             Recent Company-Wide Conversations
                         </h3>
-                        <p className="text-xs text-slate-400 mt-0.5">Live view of all recordings uploaded across teams</p>
+                        <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>
+                            Showing conversations from {dateRange === "7d" ? "the last 7 days" : dateRange === "all" ? "all time" : "the last 30 days"}
+                        </p>
                     </div>
-                    <Link to={`/w/${companySlug}/history`} className="text-xs font-bold text-violet-400 hover:text-violet-300 flex items-center gap-1">
-                        View All Calls <ArrowRight size={12} />
-                    </Link>
+
+                    <div className="flex items-center gap-2">
+                        {/* Scoped Table Filter Popover */}
+                        <div className="relative" ref={recentFilterWrapRef}>
+                            <button onClick={() => setRecentFilterOpen(o => !o)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors"
+                                style={{
+                                    background: recentFilterOpen ? T.panelHover : T.inputBg,
+                                    border: `1px solid ${activeRecentFilterCount > 0 ? "rgba(139,92,246,0.4)" : T.panelBorder}`,
+                                    color: activeRecentFilterCount > 0 ? (isDark ? "#c4b5fd" : "#7c3aed") : T.textMuted
+                                }}
+                                title="Filter conversations">
+                                <SlidersHorizontal size={12} />
+                                <span>Filter</span>
+                                {activeRecentFilterCount > 0 && (
+                                    <span className="flex items-center justify-center min-w-[15px] h-3.5 px-1 rounded-full text-[9px] font-bold text-white bg-violet-600">
+                                        {activeRecentFilterCount}
+                                    </span>
+                                )}
+                            </button>
+
+                            {recentFilterOpen && (
+                                <div className="absolute right-0 top-full mt-2 w-72 rounded-2xl overflow-hidden z-50 p-4 space-y-3"
+                                    style={{
+                                        background: T.popoverBg,
+                                        border: `1px solid ${T.popoverBorder}`,
+                                        backdropFilter: "blur(20px)",
+                                        boxShadow: T.popoverShadow,
+                                        animation: "dropdownIn 0.15s ease-out"
+                                    }}>
+                                    <div className="flex items-center justify-between pb-2 border-b"
+                                        style={{ borderColor: T.divider }}>
+                                        <p className="text-xs font-bold" style={{ color: T.text }}>Filter Conversations</p>
+                                        <button onClick={resetRecentFilters}
+                                            className="flex items-center gap-1 text-[10px] font-semibold transition-colors"
+                                            style={{ color: activeRecentFilterCount > 0 ? (isDark ? "#a78bfa" : "#7c3aed") : T.textFaint }}
+                                            disabled={activeRecentFilterCount === 0}>
+                                            <RotateCcw size={9} /> Reset
+                                        </button>
+                                    </div>
+
+                                    {/* Sentiment */}
+                                    <div>
+                                        <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: T.textFaint }}>Sentiment</p>
+                                        <div className="flex flex-wrap gap-1">
+                                            {["all", "POSITIVE", "NEUTRAL", "NEGATIVE"].map(v => (
+                                                <button key={v} onClick={() => setRecentFilters(f => ({ ...f, sentiment: v }))}
+                                                    className="px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors capitalize"
+                                                    style={{
+                                                        background: recentFilters.sentiment === v
+                                                            ? (isDark ? "rgba(139,92,246,0.2)" : "#f5f3ff")
+                                                            : (isDark ? "rgba(255,255,255,0.04)" : "#f1f5f9"),
+                                                        border: `1px solid ${recentFilters.sentiment === v ? (isDark ? "rgba(139,92,246,0.5)" : "#c4b5fd") : (isDark ? "rgba(255,255,255,0.08)" : "#e2e8f0")}`,
+                                                        color: recentFilters.sentiment === v ? (isDark ? "#c4b5fd" : "#7c3aed") : T.textMuted
+                                                    }}>
+                                                    {v === "all" ? "All" : v.charAt(0) + v.slice(1).toLowerCase()}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* QA Score */}
+                                    <div>
+                                        <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: T.textFaint }}>QA Score</p>
+                                        <div className="flex flex-wrap gap-1">
+                                            {[["all", "All"], ["high", "80+ High"], ["medium", "50–79"], ["low", "<50"]].map(([v, label]) => (
+                                                <button key={v} onClick={() => setRecentFilters(f => ({ ...f, qaScore: v }))}
+                                                    className="px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors"
+                                                    style={{
+                                                        background: recentFilters.qaScore === v
+                                                            ? (isDark ? "rgba(139,92,246,0.2)" : "#f5f3ff")
+                                                            : (isDark ? "rgba(255,255,255,0.04)" : "#f1f5f9"),
+                                                        border: `1px solid ${recentFilters.qaScore === v ? (isDark ? "rgba(139,92,246,0.5)" : "#c4b5fd") : (isDark ? "rgba(255,255,255,0.08)" : "#e2e8f0")}`,
+                                                        color: recentFilters.qaScore === v ? (isDark ? "#c4b5fd" : "#7c3aed") : T.textMuted
+                                                    }}>
+                                                    {label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Outcome Status */}
+                                    {outcomeStatusOptions.length > 0 && (
+                                        <div>
+                                            <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: T.textFaint }}>Outcome Status</p>
+                                            <select value={recentFilters.outcomeStatus} onChange={e => setRecentFilters(f => ({ ...f, outcomeStatus: e.target.value }))}
+                                                className="w-full px-2.5 py-1.5 rounded-lg text-[10px] font-semibold outline-none"
+                                                style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }}>
+                                                <option value="all">All statuses</option>
+                                                {outcomeStatusOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    {/* Call Type */}
+                                    {callTypeOptions.length > 0 && (
+                                        <div>
+                                            <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: T.textFaint }}>Call Type</p>
+                                            <select value={recentFilters.callType} onChange={e => setRecentFilters(f => ({ ...f, callType: e.target.value }))}
+                                                className="w-full px-2.5 py-1.5 rounded-lg text-[10px] font-semibold outline-none"
+                                                style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.text }}>
+                                                <option value="all">All call types</option>
+                                                {callTypeOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                                            </select>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        <Link to={`/w/${companySlug}/history`} className="text-xs font-bold flex items-center gap-1 hover:underline text-violet-600 dark:text-violet-400">
+                            View All Calls <ArrowRight size={12} />
+                        </Link>
+                    </div>
                 </div>
 
                 <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
                         <thead>
-                            <tr className="border-b border-white/10 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                            <tr className="border-b font-bold uppercase tracking-wider text-[10px]"
+                                style={{ borderColor: T.divider, color: T.textFaint }}>
                                 <th className="pb-3">Call Title</th>
                                 <th className="pb-3">Uploader</th>
                                 <th className="pb-3">Date & Time</th>
@@ -2062,33 +2509,67 @@ function OwnerDashboardView({
                                 <th className="pb-3 text-right">Action</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-white/5">
-                            {calls.slice(0, 8).map(call => (
-                                <tr key={call.id} className="hover:bg-white/5 transition-colors">
-                                    <td className="py-3 font-bold text-white max-w-[200px] truncate">{call.fileName}</td>
-                                    <td className="py-3 text-violet-300 font-medium">{call.uploaderName || "System User"}</td>
-                                    <td className="py-3 text-slate-400">{call.createdAt ? new Date(call.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</td>
-                                    <td className="py-3">
-                                        {call.overallScore != null ? (
-                                            <span className="font-extrabold px-2 py-0.5 rounded text-[11px]"
-                                                style={{ background: call.overallScore >= 70 ? "rgba(16,185,129,0.15)" : "rgba(245,158,11,0.15)", color: call.overallScore >= 70 ? "#34d399" : "#fbbf24" }}>
-                                                {call.overallScore} / 100
-                                            </span>
-                                        ) : "—"}
-                                    </td>
-                                    <td className="py-3">
-                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/10 text-violet-300 border border-violet-500/20">
-                                            {call.outcomeStatus || call.outcome || "Pending"}
-                                        </span>
-                                    </td>
-                                    <td className="py-3 text-right">
-                                        <Link to={`/w/${companySlug}/calls/${call.id}`}
-                                            className="px-2.5 py-1 rounded-lg font-bold text-[10px] bg-violet-500/15 text-violet-300 hover:bg-violet-500/25 transition-colors inline-flex items-center gap-1">
-                                            Open <ArrowUpRight size={10} />
-                                        </Link>
+                        <tbody className="divide-y" style={{ borderColor: T.divider }}>
+                            {filteredRecentCalls.length === 0 ? (
+                                <tr>
+                                    <td colSpan={6} className="py-8 text-center" style={{ color: T.textMuted }}>
+                                        <Phone size={24} className="mx-auto mb-2 opacity-50" />
+                                        <p className="font-semibold text-xs" style={{ color: T.text }}>No conversations found</p>
+                                        <p className="text-[11px] mt-0.5" style={{ color: T.textFaint }}>
+                                            {activeRecentFilterCount > 0
+                                                ? "No recordings match the active filters for this time window."
+                                                : `No recordings uploaded during ${dateRange === "7d" ? "the last 7 days" : dateRange === "all" ? "the selected period" : "the last 30 days"}.`}
+                                        </p>
                                     </td>
                                 </tr>
-                            ))}
+                            ) : (
+                                filteredRecentCalls.slice(0, 8).map(call => (
+                                    <tr key={call.id} className="transition-colors hover:opacity-90"
+                                        onMouseEnter={e => e.currentTarget.style.background = T.panelHover}
+                                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                        <td className="py-3 font-bold max-w-[200px] truncate" style={{ color: T.text }}>{call.fileName}</td>
+                                        <td className="py-3 font-medium" style={{ color: isDark ? "#c4b5fd" : "#6d28d9" }}>{call.uploaderName || "System User"}</td>
+                                        <td className="py-3" style={{ color: T.textMuted }}>{call.createdAt ? new Date(call.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+                                        <td className="py-3">
+                                            {call.overallScore != null ? (
+                                                <span className="font-extrabold px-2 py-0.5 rounded text-[11px]"
+                                                    style={{
+                                                        background: call.overallScore >= 70
+                                                            ? (isDark ? "rgba(16,185,129,0.15)" : "#ecfdf5")
+                                                            : (isDark ? "rgba(245,158,11,0.15)" : "#fffbeb"),
+                                                        color: call.overallScore >= 70
+                                                            ? (isDark ? "#34d399" : "#059669")
+                                                            : (isDark ? "#fbbf24" : "#d97706"),
+                                                        border: `1px solid ${call.overallScore >= 70 ? (isDark ? "rgba(16,185,129,0.3)" : "#a7f3d0") : (isDark ? "rgba(245,158,11,0.3)" : "#fde68a")}`
+                                                    }}>
+                                                    {call.overallScore} / 100
+                                                </span>
+                                            ) : "—"}
+                                        </td>
+                                        <td className="py-3">
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                                                style={{
+                                                    background: isDark ? "rgba(139,92,246,0.1)" : "#f5f3ff",
+                                                    color: isDark ? "#c4b5fd" : "#7c3aed",
+                                                    border: `1px solid ${isDark ? "rgba(139,92,246,0.2)" : "#ddd6fe"}`
+                                                }}>
+                                                {call.outcomeStatus || call.outcome || "Pending"}
+                                            </span>
+                                        </td>
+                                        <td className="py-3 text-right">
+                                            <Link to={`/w/${companySlug}/calls/${call.id}`}
+                                                className="px-2.5 py-1 rounded-lg font-bold text-[10px] transition-colors inline-flex items-center gap-1"
+                                                style={{
+                                                    background: isDark ? "rgba(139,92,246,0.15)" : "#f5f3ff",
+                                                    color: isDark ? "#c4b5fd" : "#7c3aed",
+                                                    border: `1px solid ${isDark ? "rgba(139,92,246,0.3)" : "#ddd6fe"}`
+                                                }}>
+                                                Open <ArrowUpRight size={10} />
+                                            </Link>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
                         </tbody>
                     </table>
                 </div>
@@ -2097,13 +2578,19 @@ function OwnerDashboardView({
             {/* AUDIT LOGS EXECUTIVE MODAL */}
             {auditLogsOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
-                    <div className="w-full max-w-2xl rounded-2xl p-6 border border-white/10" style={{ background: "#0f172a" }}>
-                        <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-4">
+                    <div className="w-full max-w-2xl rounded-2xl p-6 border"
+                        style={{
+                            background: isDark ? "#0f172a" : "#ffffff",
+                            borderColor: T.panelBorder,
+                            boxShadow: T.popoverShadow
+                        }}>
+                        <div className="flex items-center justify-between pb-4 border-b mb-4"
+                            style={{ borderColor: T.divider }}>
                             <div className="flex items-center gap-2">
-                                <FileText size={18} className="text-emerald-400" />
-                                <h3 className="text-base font-bold text-white">Workspace Security & Audit Logs</h3>
+                                <FileText size={18} className="text-emerald-500" />
+                                <h3 className="text-base font-bold" style={{ color: T.text }}>Workspace Security & Audit Logs</h3>
                             </div>
-                            <button onClick={() => setAuditLogsOpen(false)} className="p-1 rounded-lg hover:bg-white/10 text-slate-400">
+                            <button onClick={() => setAuditLogsOpen(false)} className="p-1 rounded-lg hover:opacity-80" style={{ color: T.textMuted }}>
                                 <X size={16} />
                             </button>
                         </div>
@@ -2115,20 +2602,37 @@ function OwnerDashboardView({
                                 { event: "Role Permission Updated", user: user?.name || "Owner", target: "Tyler Durden (Manager)", time: "1 day ago", status: "Success" },
                                 { event: "API Token Generated", user: user?.name || "Owner", target: "Production Key", time: "2 days ago", status: "Success" },
                             ].map((log, i) => (
-                                <div key={i} className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between">
+                                <div key={i} className="p-3 rounded-xl border flex items-center justify-between"
+                                    style={{
+                                        background: isDark ? "rgba(255,255,255,0.05)" : "#f8fafc",
+                                        borderColor: T.divider
+                                    }}>
                                     <div>
-                                        <p className="font-bold text-white">{log.event}</p>
-                                        <p className="text-[10px] text-slate-400">By {log.user} · Target: {log.target}</p>
+                                        <p className="font-bold" style={{ color: T.text }}>{log.event}</p>
+                                        <p className="text-[10px]" style={{ color: T.textMuted }}>By {log.user} · Target: {log.target}</p>
                                     </div>
                                     <div className="text-right">
-                                        <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-500/15 text-emerald-300">{log.status}</span>
-                                        <p className="text-[10px] text-slate-500 mt-0.5">{log.time}</p>
+                                        <span className="px-2 py-0.5 rounded text-[9px] font-bold"
+                                            style={{
+                                                background: isDark ? "rgba(16,185,129,0.15)" : "#ecfdf5",
+                                                color: isDark ? "#6ee7b7" : "#059669",
+                                                border: `1px solid ${isDark ? "rgba(16,185,129,0.3)" : "#a7f3d0"}`
+                                            }}>
+                                            {log.status}
+                                        </span>
+                                        <p className="text-[10px] mt-0.5" style={{ color: T.textFaint }}>{log.time}</p>
                                     </div>
                                 </div>
                             ))}
                         </div>
-                        <div className="mt-6 pt-4 border-t border-white/10 flex justify-end">
-                            <button onClick={() => setAuditLogsOpen(false)} className="px-4 py-2 rounded-xl text-xs font-bold bg-white/10 text-white hover:bg-white/15">
+                        <div className="mt-6 pt-4 border-t flex justify-end" style={{ borderColor: T.divider }}>
+                            <button onClick={() => setAuditLogsOpen(false)}
+                                className="px-4 py-2 rounded-xl text-xs font-bold transition-all hover:opacity-90"
+                                style={{
+                                    background: isDark ? "rgba(255,255,255,0.1)" : "#f1f5f9",
+                                    color: T.text,
+                                    border: `1px solid ${T.panelBorder}`
+                                }}>
                                 Close Audit Log
                             </button>
                         </div>
@@ -2612,31 +3116,39 @@ export default function DashboardPage() {
 
                             {searchOpen && searchQuery.trim() !== "" && (
                                 <div className="absolute left-0 top-full mt-2 w-full sm:w-96 rounded-2xl overflow-hidden z-50"
-                                    style={{ background: "rgba(10,10,26,0.98)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(20px)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", animation: "dropdownIn 0.15s ease-out", transformOrigin: "top" }}>
+                                    style={{
+                                        background: T.popoverBg,
+                                        border: `1px solid ${T.popoverBorder}`,
+                                        backdropFilter: "blur(20px)",
+                                        boxShadow: T.popoverShadow,
+                                        animation: "dropdownIn 0.15s ease-out",
+                                        transformOrigin: "top"
+                                    }}>
                                     <div className="max-h-72 overflow-y-auto">
                                         {searchResults.length === 0 ? (
-                                            <p className="px-4 py-6 text-xs text-slate-600 text-center">No matches for "{searchQuery}"</p>
+                                            <p className="px-4 py-6 text-xs text-center" style={{ color: T.textFaint }}>No matches for "{searchQuery}"</p>
                                         ) : (
                                             searchResults.map((call, i) => (
                                                 <Link key={call.id} to={`/w/${user?.companySlug || "default"}/calls/${call.id}`}
                                                     onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
                                                     onMouseEnter={() => setSearchActiveIndex(i)}
                                                     className="flex items-center gap-3 px-4 py-3 transition-colors"
-                                                    style={{ background: i === searchActiveIndex ? "rgba(139,92,246,0.14)" : "transparent" }}>
-                                                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "rgba(139,92,246,0.15)" }}>
-                                                        <Phone size={13} className="text-violet-400" />
+                                                    style={{ background: i === searchActiveIndex ? (T.isDark ? "rgba(139,92,246,0.14)" : "#f5f3ff") : "transparent" }}>
+                                                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                                                        style={{ background: T.isDark ? "rgba(139,92,246,0.15)" : "#ede9fe" }}>
+                                                        <Phone size={13} className="text-violet-600 dark:text-violet-400" />
                                                     </div>
                                                     <div className="flex-1 min-w-0">
-                                                        <p className="text-xs font-semibold text-white truncate">{call.fileName}</p>
-                                                        <p className="text-[10px] text-slate-500 truncate">{call.summary?.slice(0, 60) || "No summary"}</p>
+                                                        <p className="text-xs font-semibold truncate" style={{ color: T.text }}>{call.fileName}</p>
+                                                        <p className="text-[10px] truncate" style={{ color: T.textFaint }}>{call.summary?.slice(0, 60) || "No summary"}</p>
                                                     </div>
-                                                    <ArrowRight size={11} className="text-slate-600 flex-shrink-0" />
+                                                    <ArrowRight size={11} className="flex-shrink-0" style={{ color: T.textFaint }} />
                                                 </Link>
                                             ))
                                         )}
                                     </div>
                                     {searchResults.length > 0 && (
-                                        <div className="flex items-center gap-3 px-4 py-2 text-[10px]" style={{ borderTop: "1px solid rgba(255,255,255,0.07)", color: "#64748b" }}>
+                                        <div className="flex items-center gap-3 px-4 py-2 text-[10px]" style={{ borderTop: `1px solid ${T.divider}`, color: T.textFaint }}>
                                             <span className="flex items-center gap-1"><ArrowUp size={9} /><ArrowDown size={9} /> Navigate</span>
                                             <span>↵ Open</span>
                                             <span>Esc Close</span>
@@ -2660,134 +3172,15 @@ export default function DashboardPage() {
                                 <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: T.textFaint }} />
                             </div>
 
-                            <div className="relative" ref={filterWrapRef}>
-                                <button onClick={() => setFilterOpen(o => !o)}
-                                    className="relative flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors"
-                                    style={{ background: filterOpen ? T.panelHover : T.inputBg, border: `1px solid ${activeFilterCount > 0 ? "rgba(139,92,246,0.4)" : T.panelBorder}`, color: activeFilterCount > 0 ? "#a78bfa" : T.textMuted }}
-                                    title="Filter dashboard data">
-                                    <SlidersHorizontal size={13} />
-                                    Filter
-                                    {activeFilterCount > 0 && (
-                                        <span className="flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold text-white" style={{ background: "#7c3aed" }}>
-                                            {activeFilterCount}
-                                        </span>
-                                    )}
-                                </button>
-
-                                {filterOpen && (
-                                    <div className="absolute right-0 top-full mt-2 w-80 rounded-2xl overflow-hidden z-50"
-                                        style={{ background: "rgba(10,10,26,0.98)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(20px)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", animation: "dropdownIn 0.15s ease-out" }}>
-                                        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                                            <p className="text-sm font-bold text-white">Filter calls</p>
-                                            <button onClick={resetFilters}
-                                                className="flex items-center gap-1 text-[11px] font-semibold transition-colors"
-                                                style={{ color: activeFilterCount > 0 ? "#a78bfa" : "#475569" }}
-                                                disabled={activeFilterCount === 0}>
-                                                <RotateCcw size={10} /> Reset
-                                            </button>
-                                        </div>
-
-                                        <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
-                                            {/* Sentiment */}
-                                            <div>
-                                                <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: "#64748b" }}>Sentiment</p>
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {["all", "POSITIVE", "NEUTRAL", "NEGATIVE"].map(v => (
-                                                        <button key={v} onClick={() => setFilters(f => ({ ...f, sentiment: v }))}
-                                                            className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors capitalize"
-                                                            style={{
-                                                                background: filters.sentiment === v ? "rgba(139,92,246,0.18)" : "rgba(255,255,255,0.04)",
-                                                                border: `1px solid ${filters.sentiment === v ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.08)"}`,
-                                                                color: filters.sentiment === v ? "#c4b5fd" : "#94a3b8",
-                                                            }}>
-                                                            {v === "all" ? "All" : v.charAt(0) + v.slice(1).toLowerCase()}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-
-                                            {/* QA Score */}
-                                            <div>
-                                                <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: "#64748b" }}>QA Score</p>
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {[["all", "All"], ["high", "80+ High"], ["medium", "50–79 Medium"], ["low", "<50 Low"]].map(([v, label]) => (
-                                                        <button key={v} onClick={() => setFilters(f => ({ ...f, qaScore: v }))}
-                                                            className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors"
-                                                            style={{
-                                                                background: filters.qaScore === v ? "rgba(139,92,246,0.18)" : "rgba(255,255,255,0.04)",
-                                                                border: `1px solid ${filters.qaScore === v ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.08)"}`,
-                                                                color: filters.qaScore === v ? "#c4b5fd" : "#94a3b8",
-                                                            }}>
-                                                            {label}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-
-                                            {/* Outcome Status — options built from real data */}
-                                            <div>
-                                                <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: "#64748b" }}>Outcome Status</p>
-                                                {outcomeStatusOptions.length === 0 ? (
-                                                    <p className="text-[11px]" style={{ color: "#475569" }}>No outcome data yet</p>
-                                                ) : (
-                                                    <select value={filters.outcomeStatus} onChange={e => setFilters(f => ({ ...f, outcomeStatus: e.target.value }))}
-                                                        className="w-full px-3 py-2 rounded-lg text-[11px] font-semibold outline-none"
-                                                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#e2e8f0" }}>
-                                                        <option value="all">All statuses</option>
-                                                        {outcomeStatusOptions.map(s => <option key={s} value={s}>{s}</option>)}
-                                                    </select>
-                                                )}
-                                            </div>
-
-                                            {/* Call Type — options built from real data */}
-                                            <div>
-                                                <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: "#64748b" }}>Call Type</p>
-                                                {callTypeOptions.length === 0 ? (
-                                                    <p className="text-[11px]" style={{ color: "#475569" }}>No call type data yet</p>
-                                                ) : (
-                                                    <select value={filters.callType} onChange={e => setFilters(f => ({ ...f, callType: e.target.value }))}
-                                                        className="w-full px-3 py-2 rounded-lg text-[11px] font-semibold outline-none"
-                                                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#e2e8f0" }}>
-                                                        <option value="all">All call types</option>
-                                                        {callTypeOptions.map(s => <option key={s} value={s}>{s}</option>)}
-                                                    </select>
-                                                )}
-                                            </div>
-
-                                            {/* Sort By */}
-                                            <div>
-                                                <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: "#64748b" }}>Sort By</p>
-                                                <select value={filters.sortBy} onChange={e => setFilters(f => ({ ...f, sortBy: e.target.value }))}
-                                                    className="w-full px-3 py-2 rounded-lg text-[11px] font-semibold outline-none"
-                                                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#e2e8f0" }}>
-                                                    <option value="newest">Newest first</option>
-                                                    <option value="oldest">Oldest first</option>
-                                                    <option value="score_high">Highest QA score</option>
-                                                    <option value="score_low">Lowest QA score</option>
-                                                </select>
-                                            </div>
-                                        </div>
-
-                                        <div className="px-4 py-3 flex items-center justify-between" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-                                            <span className="text-[11px]" style={{ color: "#64748b" }}>{totalCalls} call{totalCalls !== 1 ? "s" : ""} match</span>
-                                            <button onClick={() => setFilterOpen(false)}
-                                                className="px-3 py-1.5 rounded-lg text-[11px] font-bold text-white transition-all active:scale-95"
-                                                style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>
-                                                Done
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
                         </div>
 
                         <div className="flex items-center gap-2 flex-shrink-0">
                             <button
                                 onClick={() => setUploadOpen(true)}
-                                className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm text-white transition-all active:scale-95"
-                                style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)", boxShadow: "0 2px 16px rgba(124,58,237,0.3)" }}
-                                onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 4px 24px rgba(124,58,237,0.5)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                                onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 2px 16px rgba(124,58,237,0.3)"; e.currentTarget.style.transform = ""; }}>
+                                className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm text-white transition-all active:scale-95 shadow-md shadow-violet-500/25"
+                                style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}
+                                onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; }}
+                                onMouseLeave={e => { e.currentTarget.style.transform = ""; }}>
                                 <Upload size={14} />
                                 Upload
                             </button>
@@ -2799,102 +3192,38 @@ export default function DashboardPage() {
                                 {themeMode === "dark" ? <Sun size={15} /> : <Moon size={15} />}
                             </button>
 
-                            <div className="relative" ref={notifWrapRef}>
-                                <button onClick={() => setNotifOpen(o => !o)}
-                                    className="relative w-9 h-9 flex items-center justify-center rounded-xl transition-colors flex-shrink-0"
-                                    style={{ background: notifOpen ? T.panelHover : T.inputBg, border: `1px solid ${T.panelBorder}`, color: T.textMuted }}
-                                    title={`${unreadNotifCount} unread notification${unreadNotifCount !== 1 ? "s" : ""}`}>
-                                    <Bell size={15} />
-                                    {unreadNotifCount > 0 && (
-                                        <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
-                                            style={{ background: "#ef4444", animation: "notifPop 0.3s ease-out" }}>
-                                            {unreadNotifCount}
-                                        </span>
-                                    )}
-                                </button>
-
-                                {notifOpen && (
-                                    <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 rounded-2xl overflow-hidden z-50"
-                                        style={{ background: "rgba(10,10,26,0.98)", border: "1px solid rgba(255,255,255,0.09)", backdropFilter: "blur(20px)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", animation: "dropdownIn 0.15s ease-out" }}>
-                                        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                                            <p className="text-sm font-bold text-white">Notifications</p>
-                                            {notifications.length > 0 && unreadNotifCount > 0 && (
-                                                <button onClick={markAllNotifsRead}
-                                                    className="flex items-center gap-1 text-[11px] font-semibold transition-colors"
-                                                    style={{ color: "#a78bfa" }}>
-                                                    <CheckCheck size={11} /> Mark all read
-                                                </button>
-                                            )}
-                                        </div>
-
-                                        <div className="max-h-96 overflow-y-auto">
-                                            {notifications.length === 0 ? (
-                                                <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
-                                                    <div className="w-11 h-11 rounded-full flex items-center justify-center mb-3" style={{ background: "rgba(255,255,255,0.05)" }}>
-                                                        <Inbox size={18} style={{ color: "#475569" }} />
-                                                    </div>
-                                                    <p className="text-xs font-semibold" style={{ color: "#94a3b8" }}>You're all caught up</p>
-                                                    <p className="text-[11px] mt-1" style={{ color: "#475569" }}>New activity will show up here.</p>
-                                                </div>
-                                            ) : (
-                                                notifications.map(n => {
-                                                    const isRead = readNotifIds.has(n.id);
-                                                    const Row = (
-                                                        <div
-                                                            onClick={() => markNotifRead(n.id)}
-                                                            className="flex items-start gap-3 px-4 py-3 cursor-pointer transition-all duration-300"
-                                                            style={{ background: isRead ? "transparent" : "rgba(139,92,246,0.06)", opacity: isRead ? 0.55 : 1, borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                                                            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${n.color}1f` }}>
-                                                                <n.Icon size={13} style={{ color: n.color }} />
-                                                            </div>
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="flex items-center gap-1.5">
-                                                                    <p className="text-xs font-semibold truncate" style={{ color: isRead ? "#94a3b8" : "#fff" }}>{n.title}</p>
-                                                                    {!isRead && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: "#8b5cf6" }} />}
-                                                                </div>
-                                                                <p className="text-[11px] mt-0.5 leading-relaxed" style={{ color: "#64748b" }}>{n.message}</p>
-                                                                <p className="text-[10px] mt-1" style={{ color: "#475569" }}>{timeAgo(n.time)}</p>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                    return n.callId ? (
-                                                        <Link key={n.id} to={`/w/${user?.companySlug || "default"}/calls/${n.callId}`} onClick={() => { markNotifRead(n.id); setNotifOpen(false); }}>
-                                                            {Row}
-                                                        </Link>
-                                                    ) : (
-                                                        <div key={n.id}>{Row}</div>
-                                                    );
-                                                })
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
+                            {/* Database-Backed Workspace & Owner Actionable Notifications */}
+                            <NotificationPopover T={T} user={user} companySlug={user?.companySlug} />
 
                             <div className="relative" onClick={(e) => e.stopPropagation()}>
                                 <button onClick={() => setProfileOpen(o => !o)}
                                     className="flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-xl transition-all"
                                     style={{ background: T.inputBg, border: `1px solid ${T.panelBorder}` }}>
-                                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
                                         style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}>
                                         {user?.name?.[0]?.toUpperCase() ?? "U"}
                                     </div>
-                                    <span className="text-sm font-medium hidden sm:block" style={{ color: T.textMuted }}>{user?.name ?? "User"}</span>
+                                    <span className="text-sm font-medium hidden sm:block" style={{ color: T.text }}>{user?.name ?? "User"}</span>
                                     <ChevronDown size={12} className={`transition-transform hidden sm:block ${profileOpen ? "rotate-180" : ""}`} style={{ color: T.textFaint }} />
                                 </button>
 
                                 {profileOpen && (
                                     <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl overflow-hidden z-50"
-                                        style={{ background: "rgba(10,10,26,0.98)", border: "1px solid rgba(255,255,255,0.09)", backdropFilter: "blur(20px)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
-                                        <div className="px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                                            <p className="text-sm font-bold text-white">{user?.name}</p>
-                                            <p className="text-xs text-slate-500 truncate mt-0.5">{user?.email}</p>
+                                        style={{
+                                            background: T.popoverBg,
+                                            border: `1px solid ${T.popoverBorder}`,
+                                            backdropFilter: "blur(20px)",
+                                            boxShadow: T.popoverShadow
+                                        }}>
+                                        <div className="px-4 py-3" style={{ borderBottom: `1px solid ${T.divider}` }}>
+                                            <p className="text-sm font-bold truncate" style={{ color: T.text }}>{user?.name}</p>
+                                            <p className="text-xs truncate mt-0.5" style={{ color: T.textFaint }}>{user?.email}</p>
                                         </div>
                                         <div className="p-2">
                                             <button onClick={handleLogout}
-                                                className="w-full text-left flex items-center gap-2.5 px-3 py-2 text-sm rounded-xl transition-all"
-                                                style={{ color: "#f87171" }}
-                                                onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.1)"; }}
+                                                className="w-full text-left flex items-center gap-2.5 px-3 py-2 text-sm rounded-xl transition-all font-medium"
+                                                style={{ color: "#ef4444" }}
+                                                onMouseEnter={e => { e.currentTarget.style.background = T.isDark ? "rgba(239,68,68,0.1)" : "#fef2f2"; }}
                                                 onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
                                                 <LogOut size={13} />
                                                 Sign out
