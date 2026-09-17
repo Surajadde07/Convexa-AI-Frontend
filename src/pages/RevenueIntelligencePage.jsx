@@ -6,14 +6,14 @@ import { useTheme } from "../context/ThemeContext.jsx";
 import api, { getUser } from "../services/api.js";
 import {
     DollarSign, TrendingUp, TrendingDown, Target, ShieldAlert,
-    BarChart2, ArrowUpRight, CheckCircle2, AlertTriangle,
+    ArrowUpRight, CheckCircle2, AlertTriangle,
     ArrowRight, RefreshCw, Zap, Activity, Award, PhoneCall,
-    XCircle, Circle, Edit3, X, Calendar, Layers, ShieldCheck
+    XCircle, Edit3, X, Layers, ShieldCheck
 } from "lucide-react";
 
 // ── Shared UI Primitives ─────────────────────────────────────────────────────
 
-function Panel({ T, children, className = "" }) {
+function Panel({ T, children, className = "", ...rest }) {
     return (
         <div
             className={`rounded-2xl border ${className}`}
@@ -22,6 +22,7 @@ function Panel({ T, children, className = "" }) {
                 borderColor: T.panelBorder,
                 boxShadow: T.cardShadow,
             }}
+            {...rest}
         >
             {children}
         </div>
@@ -60,9 +61,9 @@ function formatCurrency(val) {
 
 // ── KPI Card Component ───────────────────────────────────────────────────────
 
-function KpiCard({ T, label, value, sub, icon: Icon, accentColor, trend, loading, action }) {
+function KpiCard({ T, label, value, sub, icon: Icon, accentColor, trend, loading, action, tooltip }) {
     return (
-        <Panel T={T} className="p-4 flex flex-col justify-between gap-2 transition-all">
+        <Panel T={T} className="p-4 flex flex-col justify-between gap-2 transition-all" title={tooltip}>
             <div className="flex items-center justify-between">
                 <span className="text-[10px] font-black uppercase tracking-wider"
                     style={{ color: T.textFaint }}>
@@ -85,13 +86,13 @@ function KpiCard({ T, label, value, sub, icon: Icon, accentColor, trend, loading
                             {value}
                         </p>
                         <div className="mt-1 flex items-center justify-between gap-1">
-                            <p className="text-[11px] font-semibold flex items-center gap-1 truncate"
+                            <p className="text-[11px] font-semibold flex items-center gap-1 leading-tight"
                                 style={{
                                     color: trend === "up" ? "#10b981" : trend === "down" ? "#ef4444" : T.textMuted
                                 }}>
-                                {trend === "up" && <TrendingUp size={11} />}
-                                {trend === "down" && <TrendingDown size={11} />}
-                                {sub}
+                                {trend === "up" && <TrendingUp size={11} className="flex-shrink-0" />}
+                                {trend === "down" && <TrendingDown size={11} className="flex-shrink-0" />}
+                                <span>{sub}</span>
                             </p>
                             {action}
                         </div>
@@ -183,6 +184,20 @@ function StageProgressRow({ T, stage, totalOpenPipeline }) {
 
 // ── Target Configuration Modal ───────────────────────────────────────────────
 
+function validateRevenueTargetInput(targetVal) {
+    if (targetVal === null || targetVal === undefined || String(targetVal).trim() === "") {
+        return { valid: false, error: "Revenue target amount cannot be blank", value: null };
+    }
+    const num = parseFloat(targetVal);
+    if (isNaN(num)) {
+        return { valid: false, error: "Please enter a valid numeric revenue target", value: null };
+    }
+    if (num <= 0) {
+        return { valid: false, error: "Revenue target must be greater than zero", value: null };
+    }
+    return { valid: true, error: null, value: num };
+}
+
 function TargetModal({ T, isOpen, onClose, currentTarget, currentPeriod, onSave }) {
     const [targetVal, setTargetVal] = useState(currentTarget || "");
     const [period, setPeriod] = useState(currentPeriod || "QUARTERLY");
@@ -201,15 +216,15 @@ function TargetModal({ T, isOpen, onClose, currentTarget, currentPeriod, onSave 
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        const num = parseFloat(targetVal);
-        if (isNaN(num) || num < 0) {
-            setError("Please enter a valid non-negative revenue target");
+        const validation = validateRevenueTargetInput(targetVal);
+        if (!validation.valid) {
+            setError(validation.error);
             return;
         }
         setSaving(true);
         setError("");
         try {
-            await onSave(num, period);
+            await onSave(validation.value, period);
             onClose();
         } catch (err) {
             setError(err?.response?.data?.error || "Failed to update revenue target");
@@ -294,8 +309,8 @@ function TargetModal({ T, isOpen, onClose, currentTarget, currentPeriod, onSave 
                                 style={{ color: T.textFaint }}>$</span>
                             <input
                                 type="number"
-                                step="1000"
-                                min="0"
+                                step="0.01"
+                                min="0.01"
                                 placeholder="e.g. 250000"
                                 value={targetVal}
                                 onChange={(e) => setTargetVal(e.target.value)}
@@ -347,7 +362,6 @@ export default function RevenueIntelligencePage() {
     const [loading, setLoading] = useState(true);
     const [collapsed, setCollapsed] = useState(false);
     const [selectedRange, setSelectedRange] = useState("this_quarter");
-    const [lastRefreshed, setLastRefreshed] = useState(null);
     const [targetModalOpen, setTargetModalOpen] = useState(false);
 
     const companySlug = user?.companySlug || currentWorkspace?.company?.slug || "default";
@@ -357,7 +371,6 @@ export default function RevenueIntelligencePage() {
         try {
             const res = await api.get(`/api/company/pipeline-intelligence?range=${range}`);
             setData(res.data || null);
-            setLastRefreshed(new Date());
         } catch (err) {
             console.error("Failed to load pipeline intelligence:", err);
         } finally {
@@ -382,7 +395,7 @@ export default function RevenueIntelligencePage() {
             : 0;
 
         if (riskRatio > 0.40 || data.atRiskDealCount >= 3) return "risk";
-        if (riskRatio > 0.15 || data.atRiskDealCount > 0) return "warning";
+        if (riskRatio > 0.15 || data.atRiskDealCount > 0 || (data.atRiskDeals && data.atRiskDeals.length > 0)) return "warning";
         return "healthy";
     }, [data]);
 
@@ -473,7 +486,7 @@ export default function RevenueIntelligencePage() {
                                 >
                                     <Target size={13} />
                                     {data?.revenueTarget
-                                        ? `Target: ${formatCurrency(data.revenueTarget)}`
+                                        ? `Target: ${formatCurrency(data.revenueTarget)} (${data?.revenueTargetPeriod === "MONTHLY" ? "Mo" : "Qtr"})`
                                         : "Set Target"}
                                     <Edit3 size={11} className="opacity-70" />
                                 </button>
@@ -504,7 +517,8 @@ export default function RevenueIntelligencePage() {
                             loading={loading}
                             label="Open Pipeline"
                             value={formatCurrency(data?.totalOpenValue)}
-                            sub={`${data?.totalOpenDeals || 0} active deals`}
+                            sub={`${data?.totalOpenDeals || 0} active deal${(data?.totalOpenDeals || 0) !== 1 ? "s" : ""} · Current snapshot`}
+                            tooltip={`Current snapshot of open pipeline: ${data?.totalOpenDeals || 0} active deal${(data?.totalOpenDeals || 0) !== 1 ? "s" : ""} totaling ${formatCurrency(data?.totalOpenValue)}`}
                             icon={DollarSign}
                             accentColor="#8b5cf6"
                         />
@@ -515,7 +529,8 @@ export default function RevenueIntelligencePage() {
                             loading={loading}
                             label="Health-Weighted"
                             value={formatCurrency(data?.healthWeightedPipeline)}
-                            sub="Stage & risk adjusted"
+                            sub="Stage × call-health weighting"
+                            tooltip="Deterministic calculation using deal value × stage probability × call-health factor. This is not an ML forecast."
                             icon={Activity}
                             accentColor="#3b82f6"
                         />
@@ -526,7 +541,8 @@ export default function RevenueIntelligencePage() {
                             loading={loading}
                             label={`Closed Won (${data?.periodLabel || "Period"})`}
                             value={formatCurrency(data?.periodClosedWon)}
-                            sub={`${data?.periodClosedWonCount || 0} won deals`}
+                            sub={`${data?.periodClosedWonCount || 0} deal${(data?.periodClosedWonCount || 0) !== 1 ? "s" : ""} · ${formatCurrency(data?.periodClosedWon)} closed`}
+                            tooltip={`${data?.periodClosedWonCount || 0} closed won deal${(data?.periodClosedWonCount || 0) !== 1 ? "s" : ""} totaling ${formatCurrency(data?.periodClosedWon)} in ${data?.periodLabel || "selected period"}`}
                             icon={Award}
                             accentColor="#10b981"
                             trend={Number(data?.periodClosedWon || 0) > 0 ? "up" : undefined}
@@ -537,12 +553,79 @@ export default function RevenueIntelligencePage() {
                             T={T}
                             loading={loading}
                             label="Pipeline Coverage"
-                            value={data?.pipelineCoverageRatio != null ? `${data.pipelineCoverageRatio}x` : "No Target"}
-                            sub={data?.revenueTarget ? `vs ${formatCurrency(data.revenueTarget)} target` : "Target not set"}
+                            value={
+                                data?.targetAlignmentStatus === "PERIOD_MISMATCH"
+                                    ? "Period Mismatch"
+                                    : data?.targetAlignmentStatus === "HISTORICAL_UNAVAILABLE"
+                                        ? "Unavailable"
+                                        : data?.targetAlignmentStatus === "NOT_APPLICABLE_ALL_TIME"
+                                            ? "Not Applicable"
+                                            : data?.targetAlignmentStatus === "NO_TARGET" || !data?.revenueTarget
+                                                ? "No Target"
+                                                : data?.gapToTarget != null && Number(data.gapToTarget) <= 0
+                                                    ? "Target Achieved"
+                                                    : data?.pipelineCoverageRatio != null
+                                                        ? `${data.pipelineCoverageRatio}x`
+                                                        : "No Target"
+                            }
+                            sub={
+                                data?.targetAlignmentStatus === "PERIOD_MISMATCH"
+                                    ? `Target set for ${data?.revenueTargetPeriod?.toLowerCase() || "quarter"}`
+                                    : data?.targetAlignmentStatus === "HISTORICAL_UNAVAILABLE"
+                                        ? "Not tracked historically"
+                                        : data?.targetAlignmentStatus === "NOT_APPLICABLE_ALL_TIME"
+                                            ? "Not applicable for All Time"
+                                            : data?.targetAlignmentStatus === "NO_TARGET" || !data?.revenueTarget
+                                                ? "Target not set"
+                                                : data?.gapToTarget != null && Number(data.gapToTarget) <= 0
+                                                    ? "Target met by Closed Won"
+                                                    : data?.pipelineCoverageRatio != null
+                                                        ? `${formatCurrency(data?.totalOpenValue)} open ÷ ${formatCurrency(data?.gapToTarget)} remaining`
+                                                        : "Target not set"
+                            }
+                            tooltip={
+                                (() => {
+                                    if (data?.targetAlignmentStatus === "PERIOD_MISMATCH") {
+                                        return `Revenue target is configured for a ${data?.revenueTargetPeriod?.toLowerCase() || "quarterly"} period, which does not match the selected date range (${data?.periodLabel || "selected period"}). Select ${data?.revenueTargetPeriod === "MONTHLY" ? "This Month" : "This Quarter"} or update target.`;
+                                    }
+                                    if (data?.targetAlignmentStatus === "HISTORICAL_UNAVAILABLE") {
+                                        return `Historical pipeline coverage is not available for ${data?.periodLabel || "past periods"}.`;
+                                    }
+                                    if (data?.targetAlignmentStatus === "NOT_APPLICABLE_ALL_TIME") {
+                                        return "Pipeline coverage requires a time-bound period (e.g. This Quarter or This Month) and cannot be evaluated for All Time.";
+                                    }
+                                    if (data?.targetAlignmentStatus === "NO_TARGET" || !data?.revenueTarget) {
+                                        return "No revenue target configured. Set a revenue target to track pipeline coverage against your target.";
+                                    }
+                                    if (data?.gapToTarget != null && Number(data.gapToTarget) <= 0) {
+                                        return `Target achieved! Closed Won (${formatCurrency(data?.periodClosedWon)}) has met or exceeded the revenue target (${formatCurrency(data?.revenueTarget)}). Remaining gap is $0.`;
+                                    }
+                                    if (data?.pipelineCoverageRatio != null && data?.gapToTarget != null) {
+                                        const openNum = Number(data?.totalOpenValue || 0);
+                                        const gapNum = Number(data?.gapToTarget || 0);
+                                        const ratio = Number(data.pipelineCoverageRatio);
+                                        const openFormatted = formatCurrency(data.totalOpenValue);
+                                        const gapFormatted = formatCurrency(data.gapToTarget);
+
+                                        let requirementStatus;
+                                        if (gapNum > openNum) {
+                                            const shortfall = gapNum - openNum;
+                                            requirementStatus = `Below 1.0x coverage.\n${formatCurrency(shortfall)} below remaining requirement.`;
+                                        } else if (ratio === 1.0 || openNum === gapNum) {
+                                            requirementStatus = "At remaining requirement (1.0x coverage).";
+                                        } else {
+                                            requirementStatus = `Above remaining requirement (${ratio}x coverage).`;
+                                        }
+
+                                        return `Pipeline Coverage = Open Pipeline ÷ Remaining Revenue Gap.\nCurrent open pipeline: ${openFormatted}.\nRemaining revenue gap: ${gapFormatted}.\nCoverage: ${ratio}x.\n${requirementStatus}`;
+                                    }
+                                    return undefined;
+                                })()
+                            }
                             icon={Target}
                             accentColor="#06b6d4"
                             action={
-                                !data?.revenueTarget && isOwnerOrAdmin ? (
+                                (!data?.revenueTarget || data?.targetAlignmentStatus === "NO_TARGET") && isOwnerOrAdmin ? (
                                     <button
                                         onClick={() => setTargetModalOpen(true)}
                                         className="text-[10px] font-black underline text-violet-400 hover:text-violet-300"
@@ -558,8 +641,44 @@ export default function RevenueIntelligencePage() {
                             T={T}
                             loading={loading}
                             label={`Win Rate (${data?.periodLabel || "Period"})`}
-                            value={data?.periodWinRatePct != null ? `${data.periodWinRatePct}%` : "—"}
-                            sub={`${data?.periodClosedWonCount || 0}W / ${data?.periodClosedLostCount || 0}L`}
+                            value={
+                                (() => {
+                                    const won = data?.periodClosedWonCount || 0;
+                                    const lost = data?.periodClosedLostCount || 0;
+                                    const total = won + lost;
+                                    if (total === 0) return "0%";
+                                    return data?.periodWinRatePct != null ? `${data.periodWinRatePct}%` : "0%";
+                                })()
+                            }
+                            sub={
+                                (() => {
+                                    const won = data?.periodClosedWonCount || 0;
+                                    const lost = data?.periodClosedLostCount || 0;
+                                    const total = won + lost;
+                                    if (total === 0) return "0W / 0L · No closed deals";
+                                    if (total <= 2) {
+                                        const dealWord = total === 1 ? "1 decided deal" : `${total} decided deals`;
+                                        return `${won}W / ${lost}L · ${dealWord}`;
+                                    }
+                                    return `${won}W / ${lost}L`;
+                                })()
+                            }
+                            tooltip={
+                                (() => {
+                                    const won = data?.periodClosedWonCount || 0;
+                                    const lost = data?.periodClosedLostCount || 0;
+                                    const total = won + lost;
+                                    const period = data?.periodLabel || "selected period";
+                                    if (total === 0) {
+                                        return `No decided deals in ${period}.\nWin rate is not statistically meaningful without closed outcomes.`;
+                                    }
+                                    if (total <= 2) {
+                                        const dealWord = total === 1 ? "1 decided deal" : `${total} decided deals`;
+                                        return `Win rate = ${won} Won ÷ ${dealWord}.\nPeriod: ${period}.\nThis is an early signal because the sample contains only ${dealWord}.`;
+                                    }
+                                    return `Win rate = ${won} Won ÷ ${total} decided deals.\nPeriod: ${period}.`;
+                                })()
+                            }
                             icon={CheckCircle2}
                             accentColor="#10b981"
                         />
@@ -570,18 +689,65 @@ export default function RevenueIntelligencePage() {
                             loading={loading}
                             label="Gap to Target"
                             value={
-                                data?.gapToTarget != null
-                                    ? (Number(data.gapToTarget) <= 0 ? "Target Met" : formatCurrency(data.gapToTarget))
-                                    : "No Target"
+                                data?.targetAlignmentStatus === "PERIOD_MISMATCH"
+                                    ? "Period Mismatch"
+                                    : data?.targetAlignmentStatus === "HISTORICAL_UNAVAILABLE"
+                                        ? "Unavailable"
+                                        : data?.targetAlignmentStatus === "NOT_APPLICABLE_ALL_TIME"
+                                            ? "Not Applicable"
+                                            : data?.targetAlignmentStatus === "NO_TARGET" || !data?.revenueTarget
+                                                ? "No Target"
+                                                : data?.gapToTarget != null && Number(data.gapToTarget) <= 0
+                                                    ? "Target Achieved"
+                                                    : data?.gapToTarget != null
+                                                        ? formatCurrency(data.gapToTarget)
+                                                        : "No Target"
                             }
                             sub={
-                                data?.gapToTarget != null
-                                    ? (Number(data.gapToTarget) <= 0 ? "Exceeded target" : "Remaining to hit target")
-                                    : "Set target to track"
+                                data?.targetAlignmentStatus === "PERIOD_MISMATCH"
+                                    ? `Target set for ${data?.revenueTargetPeriod?.toLowerCase() || "quarter"}`
+                                    : data?.targetAlignmentStatus === "HISTORICAL_UNAVAILABLE"
+                                        ? "Not tracked historically"
+                                        : data?.targetAlignmentStatus === "NOT_APPLICABLE_ALL_TIME"
+                                            ? "Not applicable for All Time"
+                                            : data?.targetAlignmentStatus === "NO_TARGET" || !data?.revenueTarget
+                                                ? "Set target to track"
+                                                : data?.gapToTarget != null && Number(data.gapToTarget) <= 0
+                                                    ? "Target met by actual Closed Won"
+                                                    : data?.revenueTarget != null
+                                                        ? `${formatCurrency(data?.revenueTarget)} target − ${formatCurrency(data?.periodClosedWon)} closed`
+                                                        : "Target minus actual Closed Won"
+                            }
+                            tooltip={
+                                (() => {
+                                    if (data?.targetAlignmentStatus === "PERIOD_MISMATCH") {
+                                        return `Revenue target is configured for a ${data?.revenueTargetPeriod?.toLowerCase() || "quarterly"} period, which does not match the selected date range (${data?.periodLabel || "selected period"}). Select ${data?.revenueTargetPeriod === "MONTHLY" ? "This Month" : "This Quarter"} or update target.`;
+                                    }
+                                    if (data?.targetAlignmentStatus === "HISTORICAL_UNAVAILABLE") {
+                                        return `Historical target tracking is not available for ${data?.periodLabel || "past periods"}.`;
+                                    }
+                                    if (data?.targetAlignmentStatus === "NOT_APPLICABLE_ALL_TIME") {
+                                        return "Revenue targets apply to specific time periods and cannot be evaluated for All Time.";
+                                    }
+                                    if (data?.targetAlignmentStatus === "NO_TARGET" || !data?.revenueTarget) {
+                                        return "Set a quarterly or monthly revenue target to track your remaining revenue gap.";
+                                    }
+                                    if (data?.gapToTarget != null && Number(data.gapToTarget) <= 0) {
+                                        return `Target achieved! Actual Closed Won (${formatCurrency(data?.periodClosedWon)}) has met or exceeded the revenue target (${formatCurrency(data?.revenueTarget)}). Remaining gap is $0.`;
+                                    }
+                                    if (data?.revenueTarget != null) {
+                                        return `Revenue Target (${formatCurrency(data.revenueTarget)}) − Closed Won (${formatCurrency(data?.periodClosedWon || 0)}) = Remaining Gap (${formatCurrency(data?.gapToTarget || 0)})`;
+                                    }
+                                    return undefined;
+                                })()
                             }
                             icon={TrendingUp}
                             accentColor="#f59e0b"
-                            trend={data?.gapToTarget != null && Number(data.gapToTarget) <= 0 ? "up" : undefined}
+                            trend={
+                                data?.targetAlignmentStatus === "ALIGNED" && data?.gapToTarget != null && Number(data.gapToTarget) <= 0
+                                    ? "up"
+                                    : undefined
+                            }
                         />
                     </div>
 
@@ -671,7 +837,7 @@ export default function RevenueIntelligencePage() {
                                             background: (data?.atRiskDealCount || 0) > 0 ? "rgba(239,68,68,0.15)" : "rgba(16,185,129,0.15)",
                                             color: (data?.atRiskDealCount || 0) > 0 ? "#ef4444" : "#10b981"
                                         }}>
-                                        {(data?.atRiskDealCount || 0) > 0 ? "Active Risks" : "Healthy"}
+                                        {(data?.atRiskDealCount || 0) > 0 ? "Active Commercial Risk" : "No Active Commercial Risk"}
                                     </span>
                                 </div>
 
@@ -687,13 +853,15 @@ export default function RevenueIntelligencePage() {
                                     }}>
                                     <p className="text-xs font-bold uppercase tracking-wider"
                                         style={{ color: (data?.atRiskDealCount || 0) > 0 ? "#ef4444" : "#10b981" }}>
-                                        Total Capital Exposed
+                                        At-Risk Pipeline Exposure
                                     </p>
                                     <p className="text-3xl font-black mt-1" style={{ color: T.text }}>
                                         {formatCurrency(data?.atRiskPipelineValue)}
                                     </p>
                                     <p className="text-xs mt-1 font-semibold" style={{ color: T.textMuted }}>
-                                        Across {data?.atRiskDealCount || 0} active open deal{(data?.atRiskDealCount || 0) !== 1 ? "s" : ""}
+                                        {(data?.atRiskDealCount || 0) > 0
+                                            ? `Across ${data.atRiskDealCount} deal${data.atRiskDealCount !== 1 ? "s" : ""} with active commercial risk`
+                                            : "Deals with active commercial or conversational risk"}
                                     </p>
                                 </div>
                             </div>
@@ -722,18 +890,18 @@ export default function RevenueIntelligencePage() {
                         </Panel>
                     </div>
 
-                    {/* ── 4. At-Risk Deals Action Section ───────────────────── */}
+                    {/* ── 4. Deals Action Section ───────────────────────────── */}
                     <Panel T={T} className="p-5 space-y-4">
                         <div className="flex items-center justify-between">
                             <div>
                                 <SectionLabel T={T}>Executive Deal Intervention</SectionLabel>
                                 <h3 className="text-sm font-black flex items-center gap-2" style={{ color: T.text }}>
                                     <ShieldAlert size={16} style={{ color: "#ef4444" }} />
-                                    At-Risk Deals Requiring Attention
+                                    Deals Requiring Attention
                                 </h3>
                             </div>
                             <span className="text-xs font-bold" style={{ color: T.textMuted }}>
-                                Ranked by Capital Exposure ($)
+                                Prioritized by Deal Value & Follow-Up Urgency
                             </span>
                         </div>
 
@@ -746,7 +914,7 @@ export default function RevenueIntelligencePage() {
                                 {data.atRiskDeals.map((deal) => {
                                     const isCritical = deal.riskLevel === "CRITICAL";
                                     const isHigh = deal.riskLevel === "HIGH";
-                                    const badgeColor = isCritical ? "#ef4444" : isHigh ? "#f59e0b" : "#64748b";
+                                    const badgeColor = isCritical ? "#ef4444" : isHigh ? "#f59e0b" : "#94a3b8";
 
                                     return (
                                         <div
@@ -754,7 +922,7 @@ export default function RevenueIntelligencePage() {
                                             className="p-4 rounded-xl border flex flex-col justify-between gap-3 transition-all"
                                             style={{
                                                 background: T.isDark ? "rgba(255,255,255,0.02)" : "#ffffff",
-                                                borderColor: isCritical ? "rgba(239,68,68,0.3)" : T.panelBorder
+                                                borderColor: isCritical ? "rgba(239,68,68,0.3)" : isHigh ? "rgba(245,158,11,0.25)" : T.panelBorder
                                             }}
                                         >
                                             <div>
@@ -767,6 +935,9 @@ export default function RevenueIntelligencePage() {
                                                         <p className="text-[11px] font-semibold" style={{ color: T.textMuted }}>
                                                             {deal.accountName} · <span className="font-bold" style={{ color: "#8b5cf6" }}>{deal.stageLabel}</span>
                                                         </p>
+                                                        <p className="text-[10px] font-medium mt-0.5" style={{ color: T.textFaint }}>
+                                                            Owner: <span className="font-semibold" style={{ color: T.textMuted }}>{deal.ownerName && deal.ownerName.trim() ? deal.ownerName : "Unassigned"}</span>
+                                                        </p>
                                                     </div>
                                                     <div className="text-right flex-shrink-0">
                                                         <p className="text-base font-black" style={{ color: T.text }}>
@@ -774,7 +945,7 @@ export default function RevenueIntelligencePage() {
                                                         </p>
                                                         <span className="inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded-full"
                                                             style={{
-                                                                background: `${badgeColor}18`,
+                                                                background: isCritical ? "rgba(239,68,68,0.12)" : isHigh ? "rgba(245,158,11,0.12)" : (T.isDark ? "rgba(148,163,184,0.12)" : "rgba(100,116,139,0.12)"),
                                                                 color: badgeColor,
                                                                 border: `1px solid ${badgeColor}33`
                                                             }}>
@@ -786,8 +957,16 @@ export default function RevenueIntelligencePage() {
                                                 {/* Risk Reason Banner */}
                                                 <div className="mt-3 p-2.5 rounded-lg text-xs font-semibold flex items-start gap-2"
                                                     style={{
-                                                        background: isCritical ? "rgba(239,68,68,0.08)" : "rgba(245,158,11,0.08)",
-                                                        color: isCritical ? "#ef4444" : "#f59e0b"
+                                                        background: isCritical
+                                                            ? "rgba(239,68,68,0.08)"
+                                                            : isHigh
+                                                                ? "rgba(245,158,11,0.08)"
+                                                                : (T.isDark ? "rgba(148,163,184,0.08)" : "rgba(100,116,139,0.08)"),
+                                                        color: isCritical
+                                                            ? "#ef4444"
+                                                            : isHigh
+                                                                ? "#f59e0b"
+                                                                : (T.isDark ? "#cbd5e1" : "#475569")
                                                     }}>
                                                     <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
                                                     <span className="line-clamp-2">{deal.mainRiskReason}</span>
@@ -803,25 +982,24 @@ export default function RevenueIntelligencePage() {
                                                 </span>
 
                                                 <div className="flex items-center gap-2">
-                                                    {deal.latestCallId && (
+                                                    {deal.latestCallId ? (
                                                         <Link
-                                                            to={`/w/${companySlug}/history`}
-                                                            className="text-[11px] font-bold px-2 py-1 rounded-lg transition-all flex items-center gap-1"
+                                                            to={companySlug ? `/w/${companySlug}/calls/${deal.latestCallId}` : `/calls/${deal.latestCallId}`}
+                                                            className="text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 hover:brightness-110"
                                                             style={{
                                                                 background: "rgba(139,92,246,0.12)",
-                                                                color: "#8b5cf6"
+                                                                color: "#8b5cf6",
+                                                                border: "1px solid rgba(139,92,246,0.25)"
                                                             }}
+                                                            title="Review latest call transcript and AI insights"
                                                         >
-                                                            <PhoneCall size={11} /> Calls ({deal.relatedCallCount})
+                                                            <PhoneCall size={11} /> Latest Call <ArrowUpRight size={10} />
                                                         </Link>
+                                                    ) : (
+                                                        <span className="text-[10px] font-medium" style={{ color: T.textFaint }}>
+                                                            No calls linked
+                                                        </span>
                                                     )}
-                                                    <Link
-                                                        to={`/w/${companySlug}/dashboard`}
-                                                        className="text-[11px] font-bold hover:underline flex items-center gap-0.5"
-                                                        style={{ color: T.textMuted }}
-                                                    >
-                                                        View <ArrowRight size={11} />
-                                                    </Link>
                                                 </div>
                                             </div>
                                         </div>
@@ -834,7 +1012,7 @@ export default function RevenueIntelligencePage() {
                                     style={{ background: "rgba(16,185,129,0.15)", color: "#10b981" }}>
                                     <ShieldCheck size={22} />
                                 </div>
-                                <p className="text-sm font-bold" style={{ color: T.text }}>0 Deals Currently At Risk</p>
+                                <p className="text-sm font-bold" style={{ color: T.text }}>0 Deals Requiring Attention</p>
                                 <p className="text-xs max-w-sm mx-auto" style={{ color: T.textMuted }}>
                                     All active open deals have recent call activity, resolved objections, and positive momentum.
                                 </p>
@@ -891,10 +1069,10 @@ export default function RevenueIntelligencePage() {
                                 </p>
                             </Panel>
 
-                            {/* Signal 3: Buyer Engagement */}
+                            {/* Signal 3: Call Cadence & Momentum */}
                             <Panel T={T} className="p-5 space-y-3">
                                 <div className="flex items-center justify-between">
-                                    <span className="text-xs font-bold" style={{ color: T.textMuted }}>Buyer Engagement</span>
+                                    <span className="text-xs font-bold" style={{ color: T.textMuted }}>Call Cadence & Momentum</span>
                                     <div className="w-7 h-7 rounded-lg flex items-center justify-center"
                                         style={{ background: "rgba(16,185,129,0.15)", color: "#10b981" }}>
                                         <Zap size={15} />
@@ -902,14 +1080,14 @@ export default function RevenueIntelligencePage() {
                                 </div>
                                 <div>
                                     <p className="text-2xl font-black" style={{ color: T.text }}>
-                                        {data?.healthyEngagementDeals || 0} Healthy
+                                        {data?.healthyEngagementDeals || 0} deal{(data?.healthyEngagementDeals || 0) !== 1 ? "s" : ""} on active cadence
                                     </p>
                                     <p className="text-xs font-semibold mt-0.5" style={{ color: "#ef4444" }}>
-                                        {data?.decliningEngagementDeals || 0} showing declining engagement
+                                        {data?.decliningEngagementDeals || 0} deal{(data?.decliningEngagementDeals || 0) !== 1 ? "s" : ""} exceeded follow-up window
                                     </p>
                                 </div>
                                 <p className="text-[11px] pt-2 border-t" style={{ color: T.textFaint, borderColor: T.divider }}>
-                                    {data?.unlinkedOpenDeals || 0} open deals have zero recorded calls ({formatCurrency(data?.unlinkedOpenDealValue)}).
+                                    Based on recorded call recency and configured follow-up windows.
                                 </p>
                             </Panel>
 
